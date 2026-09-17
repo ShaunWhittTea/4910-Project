@@ -3,8 +3,6 @@
 -- Catalog and order tables are included because the sales reports and the 1% fee
 -- calculation depend on them.
 
-CREATE DATABASE IF NOT EXISTS Team09_DB
-  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE Team09_DB;
 
 -- ---------------------------------------------------------------------------
