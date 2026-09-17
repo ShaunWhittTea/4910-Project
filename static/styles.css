@@ -1,0 +1,46 @@
+body {
+    margin: 0;
+    background-color: #f3f4f6;
+    color: #1f2937;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    width: min(600px, 90%);
+    margin: 80px auto;
+    padding: 32px;
+    background-color: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 10%);
+}
+
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+input,
+button {
+    padding: 10px;
+    font: inherit;
+}
+
+button {
+    color: white;
+    background-color: #175cd3;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #124aa8;
+}
+
+.message {
+    margin-top: 20px;
+    padding: 12px;
+    background-color: #dcfce7;
+    border-radius: 5px;
+}
