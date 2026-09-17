@@ -1,11 +1,11 @@
--- Good Driver Incentive Program — starting schema (MySQL 8)
+-- Good Driver Team09_DB Program — starting schema (MySQL 8)
 -- Scope: enough tables to exercise the admin / audit / reporting endpoints.
 -- Catalog and order tables are included because the sales reports and the 1% fee
 -- calculation depend on them.
 
-CREATE DATABASE IF NOT EXISTS Incentive
+CREATE DATABASE IF NOT EXISTS Team09_DB
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE Incentive;
+USE Team09_DB;
 
 -- ---------------------------------------------------------------------------
 -- Organizations
