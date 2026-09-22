@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Sponsor Dashboard</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='styles.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Sponsor Dashboard</h1>
+
+    <p>Welcome! You are successfully logged in.</p>
+
+    <a href="{{ url_for('sponsor_profile') }}">
+    <button type="button">My Profile</button>
+    </a>
+
+    <a href="{{ url_for('sponsor_organization') }}">
+    <button type="button">Organization Profile</button>
+    </a>
+
+    <a href="{{ url_for('sponsor_logout') }}">
+        <button type="button">Logout</button>
+    </a>
+
+</div>
+
+</body>
+</html>

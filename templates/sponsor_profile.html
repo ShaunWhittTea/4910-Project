@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Sponsor Profile</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='styles.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>My Profile</h1>
+
+    {% if message %}
+        <p>{{ message }}</p>
+    {% endif %}
+
+    <form method="POST">
+
+        <label for="first_name">First Name</label>
+        <input
+            type="text"
+            id="first_name"
+            name="first_name"
+            value="{{ user['first_name'] }}"
+            required
+        >
+
+        <label for="last_name">Last Name</label>
+        <input
+            type="text"
+            id="last_name"
+            name="last_name"
+            value="{{ user['last_name'] }}"
+            required
+        >
+
+        <label for="email">Email</label>
+        <input
+            type="email"
+            id="email"
+            name="email"
+            value="{{ user['email'] }}"
+            required
+        >
+
+        <label for="phone">Phone</label>
+        <input
+            type="text"
+            id="phone"
+            name="phone"
+            value="{{ user['phone'] or '' }}"
+        >
+
+        <button type="submit">
+            Save Changes
+        </button>
+
+    </form>
+
+    <a href="{{ url_for('sponsor_dashboard') }}">
+        <button type="button">Back to Dashboard</button>
+    </a>
+
+</div>
+
+</body>
+</html>
+
+</div>
+
+</body>
+</html>
