@@ -21,9 +21,14 @@ form {
 }
 
 input,
+textarea,
 button {
     padding: 10px;
     font: inherit;
+}
+
+textarea {
+    resize: vertical;
 }
 
 button {
@@ -43,4 +48,49 @@ button:hover {
     padding: 12px;
     background-color: #dcfce7;
     border-radius: 5px;
+}
+
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.button-link {
+    display: inline-block;
+    padding: 10px;
+    color: white;
+    background-color: #175cd3;
+    border-radius: 5px;
+    text-decoration: none;
+}
+
+.button-link:hover {
+    background-color: #124aa8;
+}
+
+.inline-form {
+    display: inline;
+}
+
+.profile-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+}
+
+.profile-summary div {
+    padding: 16px;
+    background-color: #f3f4f6;
+    border-radius: 5px;
+}
+
+.profile-summary dt {
+    font-weight: bold;
+}
+
+.profile-summary dd {
+    margin: 6px 0 0;
 }
