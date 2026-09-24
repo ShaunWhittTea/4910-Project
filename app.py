@@ -126,9 +126,6 @@ def login():
 def logout():
     ...
 
-
-# 25132 & 25134 - Implement Sponsor Login Functionality ...
-
 # 25132 & 25134 - Implement Sponsor Login Functionality & Update and Improve Sponsor Login Functionality
 
 @app.route("/sponsor/login", methods=["GET", "POST"])
