@@ -4,19 +4,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Driver Login</title>
+    <title>Sign In</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 
 <body>
 <main class="container">
-    <h1>Driver Login</h1>
+    <h1>Sign In</h1>
 
     {% if message %}
         <p class="message" role="alert">{{ message }}</p>
     {% endif %}
 
-    <form method="POST">
+    <form method="POST" action="{{ url_for('login') }}">
         <label for="email">Email</label>
         <input
             type="email"
