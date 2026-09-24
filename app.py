@@ -116,15 +116,91 @@ def driver_required(function):
     return protected_function
 
 # 22356 & 22355 - Log in with credentials and automatically determine user type
-ROLE_HOME_PAGES = { ... }
+ROLE_HOME_PAGES = {
+    "DRIVER": "driver_dashboard",
+    "SPONSOR": "sponsor_dashboard",
+    # The admin dashboard has not been implemented yet. Keep authenticated
+    # admins on the existing home page until that route is available.
+    "ADMIN": "home",
+}
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    ...
+    message = None
+    email = ""
+
+    if request.method == "POST":
+        session.clear()
+
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        if not email or not password:
+            message = "Please enter both an email and password."
+            return render_template(
+                "driver_login.html",
+                message=message,
+                email=email,
+            )
+
+        try:
+            user = db.session.execute(
+                text(
+                    """
+                    SELECT u.user_id, u.role, u.password_hash,
+                           CASE
+                               WHEN u.role = 'DRIVER'
+                                   THEN d.sponsor_org_id
+                               ELSE u.sponsor_org_id
+                           END AS sponsor_org_id
+                    FROM app_user AS u
+                    LEFT JOIN driver_profile AS d
+                      ON d.user_id = u.user_id
+                    WHERE u.email = :email
+                      AND u.status = 'ACTIVE'
+                    """
+                ),
+                {"email": email},
+            ).mappings().first()
+        except Exception:
+            app.logger.exception("Login database error")
+            db.session.rollback()
+            message = "Unable to sign in right now. Please try again."
+            return render_template(
+                "driver_login.html",
+                message=message,
+                email=email,
+            )
+
+        home_page = ROLE_HOME_PAGES.get(user["role"]) if user else None
+        if (
+            user is not None
+            and home_page is not None
+            and user["password_hash"] is not None
+            and check_password_hash(user["password_hash"], password)
+        ):
+            session["user_id"] = user["user_id"]
+            session["role"] = user["role"]
+
+            if user["sponsor_org_id"] is not None:
+                session["sponsor_org_id"] = user["sponsor_org_id"]
+
+            return redirect(url_for(home_page))
+
+        # Use one response for unknown, inactive, and incorrect-password
+        # accounts so the form does not reveal whether an email is registered.
+        message = "Invalid email or password."
+
+    return render_template(
+        "driver_login.html",
+        message=message,
+        email=email,
+    )
 
 @app.route("/logout", methods=["GET", "POST"])
 def logout():
-    ...
+    session.clear()
+    return redirect(url_for("login"))
 
 
 # 25132 & 25134 - Implement Sponsor Login Functionality ...

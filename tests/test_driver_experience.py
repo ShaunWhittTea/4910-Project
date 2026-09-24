@@ -79,6 +79,63 @@ class DriverExperienceTests(unittest.TestCase):
             self.assertEqual(session["role"], "DRIVER")
             self.assertEqual(session["sponsor_org_id"], 7)
 
+    def test_shared_login_detects_driver_role_and_redirects(self):
+        user = {
+            "user_id": 42,
+            "role": "DRIVER",
+            "password_hash": generate_password_hash("correct-password"),
+            "sponsor_org_id": 7,
+        }
+
+        with patch.object(
+            driver_app.db.session,
+            "execute",
+            return_value=query_result(user),
+        ):
+            response = self.client.post(
+                "/login",
+                data={
+                    "email": "Driver@Example.com",
+                    "password": "correct-password",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.location.endswith("/driver/dashboard"))
+        with self.client.session_transaction() as session:
+            self.assertEqual(session["user_id"], 42)
+            self.assertEqual(session["role"], "DRIVER")
+            self.assertEqual(session["sponsor_org_id"], 7)
+
+    def test_shared_login_returns_safe_failure_instead_of_server_error(self):
+        with patch.object(
+            driver_app.db.session,
+            "execute",
+            return_value=query_result(None),
+        ):
+            response = self.client.post(
+                "/login",
+                data={
+                    "email": "unknown@example.com",
+                    "password": "wrong-password",
+                },
+            )
+
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Invalid email or password.", body)
+
+    def test_shared_logout_clears_session(self):
+        self.sign_in_session()
+
+        response = self.client.post("/logout")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.location.endswith("/login"))
+        with self.client.session_transaction() as session:
+            self.assertNotIn("user_id", session)
+            self.assertNotIn("role", session)
+
     def test_unknown_user_and_wrong_password_receive_same_safe_message(self):
         known_user = {
             "user_id": 42,
