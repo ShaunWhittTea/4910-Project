@@ -94,3 +94,174 @@ button:hover {
 .profile-summary dd {
     margin: 6px 0 0;
 }
+
+
+/* -------------------------------------------------------------------------
+   Driver Catalog
+   ------------------------------------------------------------------------- */
+
+.catalog-page {
+    width: min(1200px, 92%);
+    margin: 0 auto;
+    padding: 2rem 0 3rem;
+}
+
+.back-link {
+    display: inline-block;
+    margin-bottom: 1.25rem;
+    color: #1f5ea8;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.back-link:hover,
+.back-link:focus {
+    text-decoration: underline;
+}
+
+.catalog-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.catalog-header h1 {
+    margin: 0 0 0.35rem;
+}
+
+.catalog-header p {
+    margin: 0;
+}
+
+.catalog-count {
+    white-space: nowrap;
+    color: #4a5561;
+    font-weight: 600;
+}
+
+.catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
+    gap: 1.25rem;
+}
+
+.catalog-card {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #d5d9df;
+    border-radius: 0.65rem;
+    background: #ffffff;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+}
+
+.catalog-image {
+    display: block;
+    width: 100%;
+    height: 180px;
+    object-fit: cover;
+    background: #f2f4f7;
+}
+
+.catalog-image-placeholder {
+    display: grid;
+    place-items: center;
+    color: #5d6875;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.catalog-card-content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    padding: 1rem;
+}
+
+.catalog-card h2 {
+    margin: 0 0 0.65rem;
+    font-size: 1.1rem;
+    line-height: 1.3;
+}
+
+.catalog-description {
+    min-height: 2.8rem;
+    margin: 0 0 0.9rem;
+    color: #4a5561;
+    line-height: 1.4;
+}
+
+.catalog-points {
+    margin: auto 0 0;
+    color: #173f70;
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.catalog-price {
+    margin: 0.25rem 0 0;
+    color: #4a5561;
+    font-size: 0.95rem;
+}
+
+.catalog-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 2rem;
+}
+
+.page-button {
+    display: inline-block;
+    padding: 0.55rem 0.85rem;
+    border-radius: 0.4rem;
+    background: #1f5ea8;
+    color: #ffffff;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.page-button:hover,
+.page-button:focus {
+    background: #17477e;
+}
+
+.page-button-disabled {
+    background: #a5acb5;
+    cursor: not-allowed;
+}
+
+.page-status {
+    font-weight: 600;
+}
+
+.catalog-empty {
+    padding: 2rem;
+    border: 1px solid #d5d9df;
+    border-radius: 0.65rem;
+    background: #f8fafc;
+    text-align: center;
+}
+
+.catalog-empty h2 {
+    margin-top: 0;
+}
+
+.catalog-empty p {
+    margin-bottom: 0;
+    color: #4a5561;
+}
+
+@media (max-width: 600px) {
+    .catalog-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .catalog-pagination {
+        flex-wrap: wrap;
+    }
+}

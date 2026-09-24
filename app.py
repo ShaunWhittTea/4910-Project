@@ -496,5 +496,207 @@ def driver_logout():
     session.clear()
     return redirect(url_for("driver_login"))
 
+# Catalog browsing, sponsor isolation, secured catalog API
+
+def get_positive_int(
+    raw_value: str | None,
+    default: int,
+    maximum: int,
+) -> int | None:
+    """Return a bounded positive integer, or None for invalid input."""
+
+    if raw_value is None or raw_value == "":
+        return default
+
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return None
+
+    if value < 1 or value > maximum:
+        return None
+
+    return value
+
+
+def get_driver_catalog_page(
+    driver_user_id: int,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict], int]:
+    """
+    Load one page of the authenticated driver's active sponsor catalog.
+
+    Sponsor scope is derived from driver_profile in SQL. It is never accepted
+    from the query string or trusted from the browser session.
+    """
+
+    offset = (page - 1) * page_size
+
+    filters = {
+        "driver_user_id": driver_user_id,
+    }
+
+    total_items = db.session.execute(
+        text(
+            """
+            SELECT COUNT(*) AS total_items
+            FROM app_user AS u
+            JOIN driver_profile AS dp
+              ON dp.user_id = u.user_id
+            JOIN sponsor_org AS so
+              ON so.sponsor_org_id = dp.sponsor_org_id
+            JOIN catalog_item AS ci
+              ON ci.sponsor_org_id = dp.sponsor_org_id
+            WHERE u.user_id = :driver_user_id
+              AND u.role = 'DRIVER'
+              AND u.status = 'ACTIVE'
+              AND so.status = 'ACTIVE'
+              AND ci.active = 1
+            """
+        ),
+        filters,
+    ).scalar_one()
+
+    catalog_items = db.session.execute(
+        text(
+            """
+            SELECT
+                ci.catalog_item_id,
+                ci.external_product_id,
+                ci.title,
+                ci.description,
+                ci.price_usd,
+                ci.image_url,
+                CEILING(ci.price_usd / so.point_dollar_value) AS points_price
+            FROM app_user AS u
+            JOIN driver_profile AS dp
+              ON dp.user_id = u.user_id
+            JOIN sponsor_org AS so
+              ON so.sponsor_org_id = dp.sponsor_org_id
+            JOIN catalog_item AS ci
+              ON ci.sponsor_org_id = dp.sponsor_org_id
+            WHERE u.user_id = :driver_user_id
+              AND u.role = 'DRIVER'
+              AND u.status = 'ACTIVE'
+              AND so.status = 'ACTIVE'
+              AND ci.active = 1
+            ORDER BY ci.catalog_item_id ASC
+            LIMIT :page_size OFFSET :offset
+            """
+        ),
+        {
+            "driver_user_id": driver_user_id,
+            "page_size": page_size,
+            "offset": offset,
+        },
+    ).mappings().all()
+
+    return [dict(item) for item in catalog_items], total_items
+
+
+@app.get("/driver/catalog")
+@driver_required
+def driver_catalog():
+    """Render the authenticated driver's paginated sponsor catalog."""
+
+    page = get_positive_int(
+        request.args.get("page"),
+        default=1,
+        maximum=1_000_000,
+    )
+    page_size = get_positive_int(
+        request.args.get("pageSize"),
+        default=12,
+        maximum=50,
+    )
+
+    if page is None or page_size is None:
+        return "page and pageSize must be positive integers.", 400
+
+    try:
+        catalog_items, total_items = get_driver_catalog_page(
+            driver_user_id=session["user_id"],
+            page=page,
+            page_size=page_size,
+        )
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver catalog database error")
+        return "Unable to load catalog right now.", 500
+
+    total_pages = max(1, (total_items + page_size - 1) // page_size)
+
+    if page > total_pages and total_items > 0:
+        return redirect(
+            url_for(
+                "driver_catalog",
+                page=total_pages,
+                pageSize=page_size,
+            )
+        )
+
+    return render_template(
+        "driver_catalog.html",
+        catalog_items=catalog_items,
+        page=page,
+        page_size=page_size,
+        total_items=total_items,
+        total_pages=total_pages,
+    )
+
+
+@app.get("/api/catalog/items")
+@driver_required
+def catalog_items_api():
+    """Return the same secured, sponsor-scoped page as JSON."""
+
+    page = get_positive_int(
+        request.args.get("page"),
+        default=1,
+        maximum=1_000_000,
+    )
+    page_size = get_positive_int(
+        request.args.get("pageSize"),
+        default=12,
+        maximum=50,
+    )
+
+    if page is None or page_size is None:
+        return {
+            "message": "page and pageSize must be positive integers.",
+        }, 400
+
+    try:
+        catalog_items, total_items = get_driver_catalog_page(
+            driver_user_id=session["user_id"],
+            page=page,
+            page_size=page_size,
+        )
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Catalog API database error")
+        return {
+            "message": "Unable to load catalog right now.",
+        }, 500
+
+    total_pages = (
+        (total_items + page_size - 1) // page_size
+        if total_items > 0
+        else 0
+    )
+
+    return {
+        "items": catalog_items,
+        "pagination": {
+            "page": page,
+            "pageSize": page_size,
+            "totalItems": total_items,
+            "totalPages": total_pages,
+        },
+    }
+
 if __name__ == "__main__":
     app.run(debug=True)
+
+

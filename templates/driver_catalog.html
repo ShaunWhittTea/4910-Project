@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <title>My Sponsor Catalog</title>
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='styles.css') }}"
+    >
+</head>
+<body>
+    <main class="catalog-page">
+        <a class="back-link" href="{{ url_for('driver_dashboard') }}">
+            ← Back to dashboard
+        </a>
+
+        <header class="catalog-header">
+            <div>
+                <h1>My Sponsor Catalog</h1>
+                <p>Browse rewards available through your sponsor.</p>
+            </div>
+
+            <p class="catalog-count">
+                {{ total_items }} product{% if total_items != 1 %}s{% endif %}
+            </p>
+        </header>
+
+        {% if catalog_items %}
+            <section class="catalog-grid" aria-label="Catalog products">
+                {% for item in catalog_items %}
+                    <article class="catalog-card">
+                        {% if item.image_url %}
+                            <img
+                                class="catalog-image"
+                                src="{{ item.image_url }}"
+                                alt="{{ item.title }}"
+                            >
+                        {% else %}
+                            <div
+                                class="catalog-image catalog-image-placeholder"
+                                aria-label="No product image available"
+                            >
+                                No image available
+                            </div>
+                        {% endif %}
+
+                        <div class="catalog-card-content">
+                            <h2>{{ item.title }}</h2>
+
+                            {% if item.description %}
+                                <p class="catalog-description">
+                                    {{ item.description }}
+                                </p>
+                            {% endif %}
+
+                            <p class="catalog-points">
+                                {{ item.points_price }} points
+                            </p>
+
+                            <p class="catalog-price">
+                                ${{ "%.2f"|format(item.price_usd) }}
+                            </p>
+                        </div>
+                    </article>
+                {% endfor %}
+            </section>
+
+            <nav
+                class="catalog-pagination"
+                aria-label="Catalog pagination"
+            >
+                {% if page > 1 %}
+                    <a
+                        class="page-button"
+                        href="{{ url_for('driver_catalog', page=page - 1, pageSize=page_size) }}"
+                    >
+                        Previous
+                    </a>
+                {% else %}
+                    <span class="page-button page-button-disabled">
+                        Previous
+                    </span>
+                {% endif %}
+
+                <span class="page-status">
+                    Page {{ page }} of {{ total_pages }}
+                </span>
+
+                {% if page < total_pages %}
+                    <a
+                        class="page-button"
+                        href="{{ url_for('driver_catalog', page=page + 1, pageSize=page_size) }}"
+                    >
+                        Next
+                    </a>
+                {% else %}
+                    <span class="page-button page-button-disabled">
+                        Next
+                    </span>
+                {% endif %}
+            </nav>
+        {% else %}
+            <section class="catalog-empty">
+                <h2>No rewards are available yet</h2>
+                <p>
+                    Your sponsor does not currently have active catalog items.
+                </p>
+            </section>
+        {% endif %}
+    </main>
+</body>
+</html>
