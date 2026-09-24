@@ -1,20 +1,20 @@
 import os
+import click
 
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import URL, text
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
 
 load_dotenv()
 
 app = Flask(__name__)
 
-app.config["SECRET_KEY"] = os.getenv(
-    "SECRET_KEY",
-    "development-secret-key"
-)
+# 23319 - Protect stored passwords / sessions
+app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 app.config["SQLALCHEMY_DATABASE_URI"] = URL.create(
     drivername="mysql+pymysql",
@@ -24,6 +24,9 @@ app.config["SQLALCHEMY_DATABASE_URI"] = URL.create(
     port=int(os.getenv("DB_PORT", "3306")),
     database=os.environ["DB_NAME"],
 )
+
+# 23362 - Connect AWS-hosted database (keep connections alive)
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True, "pool_recycle": 280}
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -112,6 +115,19 @@ def driver_required(function):
 
     return protected_function
 
+# 22356 & 22355 - Log in with credentials and automatically determine user type
+ROLE_HOME_PAGES = { ... }
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    ...
+
+@app.route("/logout", methods=["GET", "POST"])
+def logout():
+    ...
+
+
+# 25132 & 25134 - Implement Sponsor Login Functionality ...
 
 # 25132 & 25134 - Implement Sponsor Login Functionality & Update and Improve Sponsor Login Functionality
 
@@ -696,7 +712,24 @@ def catalog_items_api():
         },
     }
 
+# 23319 - Protect stored passwords
+@app.cli.command("set-password")
+@click.argument("email")
+def set_password(email):
+    """Hash and store a password for an existing user."""
+    password = click.prompt("New password", hide_input=True, confirmation_prompt=True)
+    if len(password) < 8:
+        raise click.ClickException("Password must be at least 8 characters.")
+
+    result = db.session.execute(
+        text("UPDATE app_user SET password_hash = :hash WHERE email = :email"),
+        {"hash": generate_password_hash(password), "email": email.strip().lower()},
+    )
+    db.session.commit()
+    click.echo("Password updated." if result.rowcount else "No user with that email.")
+
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=os.getenv("FLASK_DEBUG") == "1")
 
 
