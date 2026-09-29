@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Point Tracking</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Point Tracking</h1>
+
+    {% if drivers %}
+
+        {% for driver in drivers %}
+
+            <h3>{{ driver.first_name }} {{ driver.last_name }}</h3>
+
+            <p>
+                <strong>Current Point Balance:</strong>
+                {{ driver.point_balance }}
+            </p>
+
+            <h4>Point History</h4>
+
+            {% set driver_history = point_history
+                | selectattr("driver_user_id", "equalto", driver.user_id)
+                | list %}
+
+            {% if driver_history %}
+
+                {% for change in driver_history %}
+
+                    <p>
+                        <strong>
+                            {% if change.points > 0 %}
+                                +{{ change.points }}
+                            {% else %}
+                                {{ change.points }}
+                            {% endif %}
+                        </strong>
+
+                        — {{ change.reason }}
+
+                        <br>
+
+                        <small>
+                            {{ change.created_at.strftime("%b %d, %Y %I:%M %p") }}
+                        </small>
+                    </p>
+
+                {% endfor %}
+
+            {% else %}
+
+                <p>No point changes have been recorded for this driver.</p>
+
+            {% endif %}
+
+            <hr>
+
+        {% endfor %}
+
+    {% else %}
+
+        <p>No drivers are currently associated with your organization.</p>
+
+    {% endif %}
+
+    <a href="{{ url_for('sponsor_dashboard') }}">
+        <button type="button">Back to Dashboard</button>
+    </a>
+
+</div>
+
+</body>
+</html>

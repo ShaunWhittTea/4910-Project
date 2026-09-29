@@ -265,3 +265,24 @@ button:hover {
         flex-wrap: wrap;
     }
 }
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.dashboard-grid a {
+    text-decoration: none;
+}
+
+.dashboard-grid button {
+    width: 100%;
+    height: 50px;
+}
+
+.dashboard-logout {
+    margin-top: 20px;
+    text-align: center;
+}

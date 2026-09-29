@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Order Management</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Order Management</h1>
+
+    {% if orders %}
+
+        {% for order in orders %}
+
+            <h3>Order #{{ order.order_id }}</h3>
+
+            <p>
+                <strong>Driver:</strong>
+                {{ order.first_name }} {{ order.last_name }}
+            </p>
+
+            <p>
+                <strong>Status:</strong>
+                {{ order.status }}
+            </p>
+
+            <p>
+                <strong>Total Points:</strong>
+                {{ order.total_points }}
+            </p>
+
+            <p>
+                <strong>Total Price:</strong>
+                ${{ "%.2f"|format(order.total_usd) }}
+            </p>
+
+            <p>
+                <strong>Order Date:</strong>
+                {{ order.created_at.strftime("%b %d, %Y %I:%M %p") }}
+            </p>
+
+            <hr>
+
+        {% endfor %}
+
+    {% else %}
+
+        <p>No orders have been placed for your organization.</p>
+
+    {% endif %}
+
+    <a href="{{ url_for('sponsor_dashboard') }}">
+        <button type="button">Back to Dashboard</button>
+    </a>
+
+</div>
+
+</body>
+</html>
