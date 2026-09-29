@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Driver Data</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Driver Data</h1>
+
+    {% if drivers %}
+        {% for driver in drivers %}
+
+            <h3>{{ driver.first_name }} {{ driver.last_name }}</h3>
+
+            <p><strong>Email:</strong> {{ driver.email }}</p>
+            <p><strong>Phone:</strong> {{ driver.phone or "Not provided" }}</p>
+            <p><strong>Status:</strong> {{ driver.status }}</p>
+            <p><strong>Point Balance:</strong> {{ driver.point_balance }}</p>
+            <p><strong>Shipping Address:</strong> {{ driver.shipping_address or "Not provided" }}</p>
+
+            <hr>
+
+        {% endfor %}
+    {% else %}
+
+        <p>No drivers are currently associated with your organization.</p>
+
+    {% endif %}
+
+    <a href="{{ url_for('sponsor_dashboard') }}">
+        <button type="button">Back to Dashboard</button>
+    </a>
+
+</div>
+
+</body>
+</html>

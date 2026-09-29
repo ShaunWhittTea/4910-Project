@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Point Management</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Point Management</h1>
+
+    {% if message %}
+      <p><strong>{{ message }}</strong></p>
+    {% endif %}
+
+    {% if drivers %}
+
+        {% for driver in drivers %}
+
+            <h3>{{ driver.first_name }} {{ driver.last_name }}</h3>
+
+            <p>
+                <strong>Current Point Balance:</strong>
+                {{ driver.point_balance }}
+            </p>
+
+            <form method="POST">
+
+                <input type="hidden"
+                       name="driver_user_id"
+                       value="{{ driver.user_id }}">
+
+                <label>Point Amount:</label>
+                <input type="number"
+                       name="points"
+                       min="1"
+                       required>
+
+                <br><br>
+
+                <label>Action:</label>
+                <select name="action" required>
+                    <option value="add">Add Points</option>
+                    <option value="deduct">Deduct Points</option>
+                </select>
+
+                <br><br>
+
+                <label>Reason:</label>
+                <input type="text"
+                       name="reason"
+                       placeholder="Reason for point change"
+                       required>
+
+                <br><br>
+
+                <button type="submit">Submit Point Change</button>
+
+            </form>
+
+            <hr>
+
+        {% endfor %}
+
+    {% else %}
+
+        <p>No active drivers are currently associated with your organization.</p>
+
+    {% endif %}
+
+    <a href="{{ url_for('sponsor_dashboard') }}">
+        <button type="button">Back to Dashboard</button>
+    </a>
+
+</div>
+
+</body>
+</html>

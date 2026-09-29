@@ -399,6 +399,290 @@ def sponsor_logout():
 
     return redirect(url_for("sponsor_login"))
 
+# 25158 - Sponsor Management and Points - Driver Data
+
+@app.get("/sponsor/drivers")
+@sponsor_required
+def sponsor_drivers():
+
+    drivers = db.session.execute(
+        text(
+            """
+            SELECT u.user_id,
+                   u.first_name,
+                   u.last_name,
+                   u.email,
+                   u.phone,
+                   u.status,
+                   d.point_balance,
+                   d.shipping_address
+            FROM app_user u
+            JOIN driver_profile d
+              ON u.user_id = d.user_id
+            WHERE d.sponsor_org_id = :sponsor_org_id
+              AND u.role = 'DRIVER'
+            ORDER BY u.last_name, u.first_name
+            """
+        ),
+        {
+            "sponsor_org_id": session["sponsor_org_id"]
+        },
+    ).mappings().all()
+
+    return render_template(
+        "sponsor_drivers.html",
+        drivers=drivers
+    )
+
+# 25171 - Sponsor Management and Points - Point Management
+
+@app.route("/sponsor/points", methods=["GET", "POST"])
+@sponsor_required
+def sponsor_points():
+    message = None
+
+    if request.method == "POST":
+        driver_user_id = request.form.get("driver_user_id")
+        action = request.form.get("action")
+        reason = request.form.get("reason", "").strip()
+
+        try:
+            points = int(request.form.get("points", "0"))
+        except ValueError:
+            points = 0
+
+        if points <= 0 or action not in ("add", "deduct") or not reason:
+            message = "Please enter a valid point amount, action, and reason."
+
+        else:
+            try:
+                # Make sure this driver actually belongs to this sponsor.
+                driver = db.session.execute(
+                    text(
+                        """
+                        SELECT point_balance
+                        FROM driver_profile
+                        WHERE user_id = :driver_user_id
+                          AND sponsor_org_id = :sponsor_org_id
+                        """
+                    ),
+                    {
+                        "driver_user_id": driver_user_id,
+                        "sponsor_org_id": session["sponsor_org_id"],
+                    },
+                ).mappings().first()
+
+                if driver is None:
+                    message = "Driver not found."
+
+                else:
+                    point_change = points if action == "add" else -points
+                    new_balance = driver["point_balance"] + point_change
+
+                    if new_balance < 0:
+                        message = "A driver's point balance cannot be negative."
+
+                    else:
+                        # Update the driver's current balance.
+                        db.session.execute(
+                            text(
+                                """
+                                UPDATE driver_profile
+                                SET point_balance = :new_balance
+                                WHERE user_id = :driver_user_id
+                                  AND sponsor_org_id = :sponsor_org_id
+                                """
+                            ),
+                            {
+                                "new_balance": new_balance,
+                                "driver_user_id": driver_user_id,
+                                "sponsor_org_id": session["sponsor_org_id"],
+                            },
+                        )
+
+                        # Record the change in the point ledger.
+                        db.session.execute(
+                            text(
+                                """
+                                INSERT INTO point_change
+                                    (driver_user_id,
+                                     sponsor_org_id,
+                                     actor_user_id,
+                                     points,
+                                     reason)
+                                VALUES
+                                    (:driver_user_id,
+                                     :sponsor_org_id,
+                                     :actor_user_id,
+                                     :points,
+                                     :reason)
+                                """
+                            ),
+                            {
+                                "driver_user_id": driver_user_id,
+                                "sponsor_org_id": session["sponsor_org_id"],
+                                "actor_user_id": session["user_id"],
+                                "points": point_change,
+                                "reason": reason,
+                            },
+                        )
+
+                        db.session.commit()
+                        message = "Point balance updated successfully."
+
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Point management update failed")
+                message = "Unable to update points. Please try again."
+
+    drivers = db.session.execute(
+        text(
+            """
+            SELECT u.user_id,
+                   u.first_name,
+                   u.last_name,
+                   d.point_balance
+            FROM app_user u
+            JOIN driver_profile d
+              ON u.user_id = d.user_id
+            WHERE d.sponsor_org_id = :sponsor_org_id
+              AND u.role = 'DRIVER'
+              AND u.status = 'ACTIVE'
+            ORDER BY u.last_name, u.first_name
+            """
+        ),
+        {
+            "sponsor_org_id": session["sponsor_org_id"]
+        },
+    ).mappings().all()
+
+    return render_template(
+        "sponsor_points.html",
+        drivers=drivers,
+        message=message
+    )
+
+# 25176 - Sponsor Management and Points - Point Tracking
+
+@app.get("/sponsor/point-history")
+@sponsor_required
+def sponsor_point_history():
+
+    drivers = db.session.execute(
+        text(
+            """
+            SELECT u.user_id,
+                   u.first_name,
+                   u.last_name,
+                   d.point_balance
+            FROM app_user u
+            JOIN driver_profile d
+              ON u.user_id = d.user_id
+            WHERE d.sponsor_org_id = :sponsor_org_id
+              AND u.role = 'DRIVER'
+            ORDER BY u.last_name, u.first_name
+            """
+        ),
+        {
+            "sponsor_org_id": session["sponsor_org_id"]
+        },
+    ).mappings().all()
+
+    point_history = db.session.execute(
+        text(
+            """
+            SELECT pc.point_change_id,
+                   pc.driver_user_id,
+                   pc.points,
+                   pc.reason,
+                   pc.created_at,
+                   u.first_name,
+                   u.last_name
+            FROM point_change pc
+            JOIN app_user u
+              ON pc.driver_user_id = u.user_id
+            WHERE pc.sponsor_org_id = :sponsor_org_id
+            ORDER BY pc.created_at DESC
+            """
+        ),
+        {
+            "sponsor_org_id": session["sponsor_org_id"]
+        },
+    ).mappings().all()
+
+    return render_template(
+        "sponsor_point_history.html",
+        drivers=drivers,
+        point_history=point_history
+    )
+
+# 25175 - Sponsor Management and Points - Order Management
+
+@app.get("/sponsor/orders")
+@sponsor_required
+def sponsor_orders():
+
+    orders = db.session.execute(
+        text(
+            """
+            SELECT po.order_id,
+                   po.status,
+                   po.total_points,
+                   po.total_usd,
+                   po.created_at,
+                   u.first_name,
+                   u.last_name
+            FROM purchase_order po
+            JOIN app_user u
+              ON po.driver_user_id = u.user_id
+            WHERE po.sponsor_org_id = :sponsor_org_id
+            ORDER BY po.created_at DESC
+            """
+        ),
+        {
+            "sponsor_org_id": session["sponsor_org_id"]
+        },
+    ).mappings().all()
+
+    return render_template(
+        "sponsor_orders.html",
+        orders=orders
+    )
+
+# 25156 - Sponsor Management and Points - Sponsor Communications
+
+
+@app.get("/sponsor/communications")
+@sponsor_required
+def sponsor_communications():
+
+    drivers = db.session.execute(
+        text(
+            """
+            SELECT u.user_id,
+                   u.first_name,
+                   u.last_name,
+                   u.email,
+                   u.phone,
+                   u.status
+            FROM app_user u
+            JOIN driver_profile d
+              ON u.user_id = d.user_id
+            WHERE d.sponsor_org_id = :sponsor_org_id
+              AND u.role = 'DRIVER'
+            ORDER BY u.last_name, u.first_name
+            """
+        ),
+        {
+            "sponsor_org_id": session["sponsor_org_id"]
+        },
+    ).mappings().all()
+
+    return render_template(
+        "sponsor_communications.html",
+        drivers=drivers
+    )
+
 
 # 21752 & 22364 - Driver sign in and safe login-failure feedback
 
