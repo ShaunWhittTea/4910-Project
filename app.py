@@ -967,9 +967,49 @@ def get_driver_catalog_page(
 
     return [dict(item) for item in catalog_items], total_items
 
+def catalog_driver_required(function):
+    """Recheck current database authorization for catalog requests."""
+
+    @wraps(function)
+    def protected_function(*args, **kwargs):
+        if session.get("user_id") is None:
+            return redirect(url_for("driver_login"))
+
+        if session.get("role") != "DRIVER":
+            return "Access denied.", 403
+
+        try:
+            authorized = db.session.execute(
+                text(
+                    """
+                    SELECT u.user_id
+                    FROM app_user AS u
+                    JOIN driver_profile AS dp
+                      ON dp.user_id = u.user_id
+                    JOIN sponsor_org AS so
+                      ON so.sponsor_org_id = dp.sponsor_org_id
+                    WHERE u.user_id = :user_id
+                      AND u.role = 'DRIVER'
+                      AND u.status = 'ACTIVE'
+                      AND so.status = 'ACTIVE'
+                    """
+                ),
+                {"user_id": session["user_id"]},
+            ).first()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("Catalog authorization check failed")
+            return "Unable to verify access.", 503
+
+        if authorized is None:
+            return "Access denied.", 403
+
+        return function(*args, **kwargs)
+
+    return protected_function
 
 @app.get("/driver/catalog")
-@driver_required
+@catalog_driver_required
 def driver_catalog():
     """Render the authenticated driver's paginated sponsor catalog."""
 
@@ -1020,7 +1060,7 @@ def driver_catalog():
 
 
 @app.get("/api/catalog/items")
-@driver_required
+@catalog_driver_required
 def catalog_items_api():
     """Return the same secured, sponsor-scoped page as JSON."""
 

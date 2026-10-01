@@ -18,6 +18,10 @@ def result_for(count, rows):
     result.mappings.return_value.all.return_value = rows
     return result
 
+def authorized_driver():
+    result = MagicMock()
+    result.first.return_value = (2,)
+    return result
 
 class CatalogTests(unittest.TestCase):
     def setUp(self):
@@ -67,7 +71,9 @@ class CatalogTests(unittest.TestCase):
             "points_price": 2499,
         }]
         with patch.object(catalog_app.db.session, "execute", side_effect=[
-            result_for(5, []), result_for(0, rows),
+            authorized_driver(),
+            result_for(5, []),
+            result_for(0, rows),
         ]) as execute:
             response = self.client.get("/api/catalog/items?page=2&pageSize=2")
 
