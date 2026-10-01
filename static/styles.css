@@ -265,6 +265,285 @@ button:hover {
         flex-wrap: wrap;
     }
 }
+/* ------------------------------
+   WIDE LOW HOME PAGE
+------------------------------ */
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+
+/* NAVIGATION */
+
+.navbar {
+    height: 90px;
+    background: #0d294c;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    padding: 0 55px;
+
+    color: white;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+}
+
+.brand .fa-car {
+    font-size: 42px;
+}
+
+.brand-name {
+    font-family: "Permanent Marker", cursive;
+    font-size: 38px;
+    letter-spacing: 1px;
+}
+
+.nav-links {
+    display: flex;
+    align-items: center;
+    gap: 45px;
+}
+
+.nav-links a {
+    text-decoration: none;
+}
+
+.about-link {
+    color: white;
+    font-size: 20px;
+}
+
+.about-link:hover {
+    opacity: 0.8;
+}
+
+.login-button {
+    background: white;
+    color: #0d294c;
+
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    padding: 14px 24px;
+
+    border-radius: 9px;
+
+    font-size: 20px;
+    font-weight: 600;
+
+    transition: 0.2s;
+}
+
+.login-button:hover {
+    transform: translateY(-2px);
+}
+
+
+/* HERO */
+
+.hero {
+    position: relative;
+
+    min-height: calc(100vh - 90px);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    background-image: url("/static/highway-background.jfif");
+
+    background-size: cover;
+    background-position: center;
+
+    text-align: center;
+}
+
+.hero-overlay {
+    position: absolute;
+    inset: 0;
+
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.hero-content {
+    position: relative;
+    z-index: 1;
+
+    max-width: 900px;
+
+    padding: 40px;
+}
+
+.hero-content h1 {
+    margin: 0;
+
+    color: #071e3d;
+
+    font-size: clamp(55px, 7vw, 95px);
+    line-height: 0.95;
+    font-weight: 800;
+}
+
+.hero-description {
+    max-width: 600px;
+
+    margin: 35px auto;
+
+    color: #071e3d;
+
+    font-size: 20px;
+    line-height: 1.6;
+}
+
+.get-started-button {
+    display: inline-block;
+
+    padding: 16px 42px;
+
+    background: #1464c0;
+    color: white;
+
+    border-radius: 8px;
+
+    text-decoration: none;
+
+    font-size: 19px;
+    font-weight: 600;
+
+    transition: 0.2s;
+}
+
+.get-started-button:hover {
+    transform: translateY(-2px);
+    background: #0d4f9b;
+}
+
+
+/* ABOUT */
+
+.about-section {
+    min-height: 600px;
+
+    padding: 140px 30px 120px;
+
+    text-align: center;
+
+    background: white;
+    color: #071e3d;
+}
+
+.about-section h2 {
+    margin: 0 0 35px;
+
+    font-size: 42px;
+}
+
+.about-info {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.product-description {
+    max-width: 750px;
+
+    margin: 0 auto 60px;
+
+    font-size: 19px;
+    line-height: 1.8;
+}
+
+.about-details {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+
+    gap: 25px;
+}
+
+.about-detail {
+    min-width: 180px;
+
+    padding: 25px 30px;
+
+    background: #f5f7fa;
+
+    border-radius: 10px;
+}
+
+.about-detail strong {
+    display: block;
+
+    margin-bottom: 10px;
+
+    color: #071e3d;
+
+    font-size: 17px;
+}
+
+.about-detail span {
+    color: #555;
+
+    font-size: 16px;
+}
+
+
+/* MOBILE */
+
+@media (max-width: 700px) {
+
+    .navbar {
+        padding: 0 20px;
+    }
+
+    .brand {
+        gap: 12px;
+    }
+
+    .brand-name {
+        font-size: 25px;
+    }
+
+    .brand .fa-car {
+        font-size: 30px;
+    }
+
+    .nav-links {
+        gap: 15px;
+    }
+
+    .about-link {
+        display: none;
+    }
+
+    .login-button {
+        padding: 11px 15px;
+        font-size: 16px;
+    }
+
+    .hero-content h1 {
+        font-size: 50px;
+    }
+}
+
+
+/* DASHBOARD */
 
 .dashboard-grid {
     display: grid;
@@ -285,4 +564,5 @@ button:hover {
 .dashboard-logout {
     margin-top: 20px;
     text-align: center;
+
 }

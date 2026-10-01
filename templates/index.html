@@ -4,35 +4,108 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>4910 Project</title>
+    <title>Wide Low</title>
 
     <link
         rel="stylesheet"
-        href="{{ url_for('static', filename='style.css') }}"
+        href="{{ url_for('static', filename='styles.css') }}"
+    >
+
+    <!-- Font Awesome for the car/login icons -->
+    <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    >
+
+    <!-- Brush-style font for Wide Low -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap"
+        rel="stylesheet"
     >
 </head>
+
 <body>
-    <main class="container">
-        <h1>Good Driver Incentive Program</h1>
 
-        <p>This page is being displayed by Flask.</p>
+    <nav class="navbar">
+        <div class="brand">
+            <i class="fa-solid fa-car"></i>
+            <span class="brand-name">WIDE LOW</span>
+        </div>
 
-        <form method="post">
-            <label for="name">Enter your name</label>
+        <div class="nav-links">
+            <a href="#about" class="about-link">About</a>
 
-            <input
-                id="name"
-                name="name"
-                type="text"
-                placeholder="Your name"
-            >
+            <a href="{{ url_for('login') }}" class="login-button">
+                <i class="fa-solid fa-user"></i>
+                <span>Login</span>
+            </a>
+        </div>
+    </nav>
 
-            <button type="submit">Submit</button>
-        </form>
+    <main class="hero">
+        <div class="hero-overlay"></div>
 
-        {% if message %}
-            <p class="message">{{ message }}</p>
-        {% endif %}
+        <div class="hero-content">
+            <h1>
+                Good Driver<br>
+                Incentive Program
+            </h1>
+
+            <p class="hero-description">
+                Rewarding safe driving
+            </p>
+
+            <a href="{{ url_for('login') }}" class="get-started-button">
+                Get Started
+            </a>
+        </div>
     </main>
+
+    <section id="about" class="about-section">
+
+        <h2>About Wide Low</h2>
+
+        {% if info %}
+
+            <div class="about-info">
+
+                <p class="product-description">
+                    {{ info.product_description }}
+                </p>
+
+                <div class="about-details">
+
+                    <div class="about-detail">
+                        <strong>Team</strong>
+                        <span>{{ info.team_number }}</span>
+                    </div>
+
+                    <div class="about-detail">
+                        <strong>Version</strong>
+                        <span>{{ info.version_number }}</span>
+                    </div>
+
+                    <div class="about-detail">
+                        <strong>Release Date</strong>
+                        <span>{{ info.release_date }}</span>
+                    </div>
+
+                    <div class="about-detail">
+                        <strong>Product Name</strong>
+                        <span>{{ info.product_name }}</span>
+                    </div>
+
+                </div>
+
+            </div>
+
+        {% else %}
+
+            <p>About information is currently unavailable.</p>
+
+        {% endif %}
+
+    </section>
+
 </body>
 </html>
