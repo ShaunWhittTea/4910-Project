@@ -33,19 +33,31 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 
-@app.route("/", methods=["GET", "POST"])
+@app.get("/")
 def home():
-    message = None
+    try:
+        info = db.session.execute(
+            text(
+                """
+                SELECT
+                    team_number,
+                    version_number,
+                    release_date,
+                    product_name,
+                    product_description
+                FROM about_info
+                ORDER BY about_id DESC
+                LIMIT 1
+                """
+            )
+        ).mappings().first()
 
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
+    except Exception:
+        app.logger.exception("About information database error")
+        db.session.rollback()
+        info = None
 
-        if name:
-            message = f"Welcome, {name}!"
-        else:
-            message = "Please enter your name."
-
-    return render_template("index.html", message=message)
+    return render_template("index.html", info=info)
 
 
 @app.get("/db-check")
