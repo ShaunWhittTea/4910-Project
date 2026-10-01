@@ -57,7 +57,9 @@ class CatalogTests(unittest.TestCase):
                 with self.subTest(query=query):
                     response = self.client.get("/api/catalog/items" + query)
                     self.assertEqual(response.status_code, 400)
-            execute.assert_not_called()
+            self.assertEqual(execute.call_count, 4)
+            for call in execute.call_args_list:
+                self.assertEqual(call.args[1], {"user_id": 2})
 
     def test_page_two_has_correct_offset_count_and_items(self):
         self.sign_in()
@@ -83,17 +85,18 @@ class CatalogTests(unittest.TestCase):
             "page": 2, "pageSize": 2, "totalItems": 5, "totalPages": 3,
         })
         self.assertEqual(body["items"][0]["title"], "Thermos")
-        self.assertEqual(execute.call_count, 2)
-        self.assertEqual(execute.call_args_list[0].args[1], {"driver_user_id": 2})
-        self.assertEqual(execute.call_args_list[1].args[1], {
+        self.assertEqual(execute.call_count, 3)
+        self.assertEqual(execute.call_args_list[1].args[1], {"driver_user_id": 2})
+        self.assertEqual(execute.call_args_list[2].args[1], {
             "driver_user_id": 2, "page_size": 2, "offset": 2,
         })
-        self.assertIn("ci.sponsor_org_id = dp.sponsor_org_id", str(execute.call_args_list[1].args[0]))
-        self.assertIn("ci.active = 1", str(execute.call_args_list[1].args[0]))
+        self.assertIn("ci.sponsor_org_id = dp.sponsor_org_id", str(execute.call_args_list[2].args[0]))
+        self.assertIn("ci.active = 1", str(execute.call_args_list[2].args[0]))
 
     def test_session_and_url_sponsor_ids_are_not_query_inputs(self):
         self.sign_in(sponsor_org_id=999)
         with patch.object(catalog_app.db.session, "execute", side_effect=[
+            authorized_driver(),
             result_for(0, []), result_for(0, []),
         ]) as execute:
             response = self.client.get("/api/catalog/items?sponsor_org_id=888")

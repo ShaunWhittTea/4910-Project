@@ -172,7 +172,7 @@ class CatalogIsolationTests(unittest.TestCase):
         )
         self.assertNotIn("Sponsor A Item", str(body))
 
-    def test_inactive_driver_receives_no_catalog_rows(self):
+    def test_inactive_driver_is_denied_catalog_access(self):
         self.sign_in(user_id=303, fake_sponsor_id=1)
 
         response = self.client.get("/api/catalog/items")
