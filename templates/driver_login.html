@@ -5,10 +5,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Sign In</title>
+
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+
+    <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+    >
 </head>
 
 <body>
+
+<nav class="navbar">
+    <a href="{{ url_for('home') }}" class="brand">
+        <i class="fa-solid fa-car"></i>
+        <span class="brand-name">WIDE LOAD</span>
+    </a>
+</nav>
+
 <main class="container">
     <h1>Sign In</h1>
 
@@ -39,5 +53,6 @@
         <button type="submit">Sign In</button>
     </form>
 </main>
+
 </body>
 </html>
