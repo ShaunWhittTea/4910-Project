@@ -9,11 +9,38 @@
         rel="stylesheet"
         href="{{ url_for('static', filename='styles.css') }}"
     >
+
+    <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+    >
 </head>
 
 <body>
 
-    <h1>Admin Profile</h1>
+    <nav class="navbar">
+        <div class="brand">
+            <i class="fa-solid fa-car"></i>
+            <span class="brand-name">WIDE LOAD</span>
+        </div>
+            <form
+                action="{{ url_for('logout') }}"
+                method="POST"
+                onsubmit="return confirm('Are you sure you want to log out?');"
+            >
+                <button type="submit" class="login-button">
+                    <i class="fa-solid fa-user"></i>
+                    <span>Logout</span>
+                </button>
+            </form>
+        </div>
+    </nav>
+
+
+    <div class="admin-header">
+        <h1>Admin Profile</h1>
+    </div>
+
     <p>Welcome to the admin page.</p>
 
 </body>

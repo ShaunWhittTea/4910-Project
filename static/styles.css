@@ -566,3 +566,15 @@ body {
     text-align: center;
 
 }
+.brand {
+    text-decoration: none;
+    color: white;
+}
+
+.brand:visited {
+    color: white;
+}
+
+.brand:hover {
+    color: white;
+}

@@ -137,6 +137,9 @@ ROLE_HOME_PAGES = {
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+     # If an admin is already logged in, send them back to the admin page
+    if session.get("user_id") and session.get("role") == "ADMIN":
+        return redirect(url_for("admin_home"))
     message = None
     email = ""
 
