@@ -100,7 +100,7 @@ def sponsor_required(function):
 
         # User must be logged in
         if session.get("user_id") is None:
-            return redirect(url_for("sponsor_login"))
+            return redirect(url_for("login"))
 
         # User must have the SPONSOR role
         if session.get("role") != "SPONSOR":
@@ -221,56 +221,6 @@ def logout():
 
 # 25132 & 25134 - Implement Sponsor Login Functionality & Update and Improve Sponsor Login Functionality
 
-@app.route("/sponsor/login", methods=["GET", "POST"])
-def sponsor_login():
-    message = None
-
-    if request.method == "POST":
-        session.clear()
-
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
-
-        if not email or not password:
-            message = "Please enter both an email and password."
-            return render_template("sponsor_login.html", message=message)
-
-        try:
-            user = db.session.execute(
-                text(
-                    """
-                    SELECT user_id, email, password_hash,
-                           first_name, last_name, sponsor_org_id
-                    FROM app_user
-                    WHERE email = :email
-                      AND role = 'SPONSOR'
-                      AND status = 'ACTIVE'
-                    """
-                ),
-                {"email": email},
-            ).mappings().first()
-
-        except Exception:
-            app.logger.exception("Sponsor login database error")
-            db.session.rollback()
-
-            message = "Unable to process login right now. Please try again."
-            return render_template("sponsor_login.html", message=message)
-
-        if (
-            user is not None
-            and user["password_hash"] is not None
-            and check_password_hash(user["password_hash"], password)
-        ):
-            session["user_id"] = user["user_id"]
-            session["role"] = "SPONSOR"
-            session["sponsor_org_id"] = user["sponsor_org_id"]
-
-            return redirect(url_for("sponsor_dashboard"))
-
-        message = "Invalid email or password."
-
-    return render_template("sponsor_login.html", message=message)
 
 @app.get("/sponsor/dashboard")
 @sponsor_required
@@ -294,6 +244,7 @@ def admin_home():
 @sponsor_required
 def sponsor_profile():
     message = None
+    edit_mode = request.args.get("edit") == "1"
 
     if request.method == "POST":
         first_name = request.form.get("first_name", "").strip()
@@ -348,12 +299,13 @@ def sponsor_profile():
 
     if user is None:
         session.clear()
-        return redirect(url_for("sponsor_login"))
+        return redirect(url_for("login"))
 
     return render_template(
         "sponsor_profile.html",
         user=user,
-        message=message
+        message=message,
+        edit_mode=edit_mode
     )
 
 
@@ -363,6 +315,7 @@ def sponsor_profile():
 @sponsor_required
 def sponsor_organization():
     message = None
+    edit_mode = request.args.get("edit") == "1"
 
     if request.method == "POST":
         name = request.form.get("name", "").strip()
@@ -417,14 +370,127 @@ def sponsor_organization():
     return render_template(
         "sponsor_organization.html",
         organization=organization,
-        message=message
+        message=message,
+        edit_mode=edit_mode
     )
 
 @app.get("/sponsor/logout")
 def sponsor_logout():
     session.clear()
 
-    return redirect(url_for("sponsor_login"))
+    return redirect(url_for("login"))
+
+# 25137 - Sponsor Create New Driver
+@app.route("/sponsor/drivers/create", methods=["GET", "POST"])
+@sponsor_required
+def sponsor_create_driver():
+    message = None
+
+    if request.method == "POST":
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        phone = request.form.get("phone", "").strip()
+        password = request.form.get("password", "")
+        shipping_address = request.form.get("shipping_address", "").strip()
+
+        if not first_name or not last_name or not email or not password:
+            message = "First name, last name, email, and password are required."
+
+        elif len(password) < 8:
+            message = "Password must be at least 8 characters."
+
+        else:
+            try:
+                # Make sure the email is not already being used.
+                existing_user = db.session.execute(
+                    text(
+                        """
+                        SELECT user_id
+                        FROM app_user
+                        WHERE email = :email
+                        """
+                    ),
+                    {"email": email},
+                ).first()
+
+                if existing_user is not None:
+                    message = "A user with that email already exists."
+
+                else:
+                    # Create the driver's user account.
+                    result = db.session.execute(
+                        text(
+                            """
+                            INSERT INTO app_user
+                                (role,
+                                 email,
+                                 password_hash,
+                                 first_name,
+                                 last_name,
+                                 phone,
+                                 status,
+                                 sponsor_org_id)
+                            VALUES
+                                ('DRIVER',
+                                 :email,
+                                 :password_hash,
+                                 :first_name,
+                                 :last_name,
+                                 :phone,
+                                 'ACTIVE',
+                                 :sponsor_org_id)
+                            """
+                        ),
+                        {
+                            "email": email,
+                            "password_hash": generate_password_hash(password),
+                            "first_name": first_name,
+                            "last_name": last_name,
+                            "phone": phone if phone else None,
+                            "sponsor_org_id": session["sponsor_org_id"],
+                        },
+                    )
+
+                    driver_user_id = result.lastrowid
+
+                    # Create the driver's profile and connect it to this sponsor.
+                    db.session.execute(
+                        text(
+                            """
+                            INSERT INTO driver_profile
+                                (user_id,
+                                 sponsor_org_id,
+                                 point_balance,
+                                 shipping_address)
+                            VALUES
+                                (:user_id,
+                                 :sponsor_org_id,
+                                 0,
+                                 :shipping_address)
+                            """
+                        ),
+                        {
+                            "user_id": driver_user_id,
+                            "sponsor_org_id": session["sponsor_org_id"],
+                            "shipping_address": (
+                                shipping_address if shipping_address else None
+                            ),
+                        },
+                    )
+
+                    db.session.commit()
+                    message = "Driver created successfully."
+
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Driver creation failed")
+                message = "Unable to create driver. Please try again."
+
+    return render_template(
+        "sponsor_create_driver.html",
+        message=message
+    )
 
 # 25158 - Sponsor Management and Points - Driver Data
 @app.get("/sponsor/drivers")

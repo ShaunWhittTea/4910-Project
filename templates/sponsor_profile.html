@@ -15,63 +15,98 @@
 
 <div class="container">
 
-    <h1>My Profile</h1>
+    {% if edit_mode %}
 
-    {% if message %}
-        <p>{{ message }}</p>
+        <h1>Edit Profile</h1>
+
+        {% if message %}
+            <p>{{ message }}</p>
+        {% endif %}
+
+        <form method="POST">
+
+            <label for="first_name">First Name</label>
+            <input
+                type="text"
+                id="first_name"
+                name="first_name"
+                value="{{ user['first_name'] }}"
+                required
+            >
+
+            <label for="last_name">Last Name</label>
+            <input
+                type="text"
+                id="last_name"
+                name="last_name"
+                value="{{ user['last_name'] }}"
+                required
+            >
+
+            <label for="email">Email</label>
+            <input
+                type="email"
+                id="email"
+                name="email"
+                value="{{ user['email'] }}"
+                required
+            >
+
+            <label for="phone">Phone</label>
+            <input
+                type="text"
+                id="phone"
+                name="phone"
+                value="{{ user['phone'] or '' }}"
+            >
+
+            <button type="submit">
+                Save Changes
+            </button>
+
+        </form>
+
+        <a href="{{ url_for('sponsor_profile') }}">
+            <button type="button">Cancel</button>
+        </a>
+
+    {% else %}
+
+        <h1>My Profile</h1>
+
+        {% if message %}
+            <p>{{ message }}</p>
+        {% endif %}
+
+        <p>
+            <strong>First Name:</strong>
+            {{ user['first_name'] }}
+        </p>
+
+        <p>
+            <strong>Last Name:</strong>
+            {{ user['last_name'] }}
+        </p>
+
+        <p>
+            <strong>Email:</strong>
+            {{ user['email'] }}
+        </p>
+
+        <p>
+            <strong>Phone:</strong>
+            {{ user['phone'] or 'Not provided' }}
+        </p>
+
+        <a href="{{ url_for('sponsor_profile', edit=1) }}">
+            <button type="button">Edit Profile</button>
+        </a>
+
+        <a href="{{ url_for('sponsor_dashboard') }}">
+            <button type="button">Back to Dashboard</button>
+        </a>
+
     {% endif %}
-
-    <form method="POST">
-
-        <label for="first_name">First Name</label>
-        <input
-            type="text"
-            id="first_name"
-            name="first_name"
-            value="{{ user['first_name'] }}"
-            required
-        >
-
-        <label for="last_name">Last Name</label>
-        <input
-            type="text"
-            id="last_name"
-            name="last_name"
-            value="{{ user['last_name'] }}"
-            required
-        >
-
-        <label for="email">Email</label>
-        <input
-            type="email"
-            id="email"
-            name="email"
-            value="{{ user['email'] }}"
-            required
-        >
-
-        <label for="phone">Phone</label>
-        <input
-            type="text"
-            id="phone"
-            name="phone"
-            value="{{ user['phone'] or '' }}"
-        >
-
-        <button type="submit">
-            Save Changes
-        </button>
-
-    </form>
-
-    <a href="{{ url_for('sponsor_dashboard') }}">
-        <button type="button">Back to Dashboard</button>
-    </a>
-
-</div>
-
-</body>
-</html>
 
 </div>
 
