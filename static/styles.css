@@ -97,6 +97,112 @@ button:hover {
 
 
 /* -------------------------------------------------------------------------
+   Driver Point History
+   ------------------------------------------------------------------------- */
+
+.point-history-page {
+    width: min(1100px, 92%);
+    margin: 48px auto;
+    padding: 32px;
+    background-color: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 10%);
+}
+
+.point-history-header h1 {
+    margin-bottom: 8px;
+}
+
+.point-history-header p {
+    margin-top: 0;
+    color: #4b5563;
+}
+
+.point-history-table-wrap {
+    overflow-x: auto;
+    margin-top: 24px;
+}
+
+.point-history-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.point-history-table th,
+.point-history-table td {
+    padding: 14px;
+    border-bottom: 1px solid #d1d5db;
+    text-align: left;
+    vertical-align: top;
+}
+
+.point-history-table th {
+    background-color: #eef2f7;
+    color: #1f2937;
+}
+
+.point-change {
+    display: inline-block;
+    min-width: 118px;
+    padding: 6px 10px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.point-addition {
+    color: #166534;
+    background-color: #dcfce7;
+}
+
+.point-deduction {
+    color: #991b1b;
+    background-color: #fee2e2;
+}
+
+.point-neutral {
+    color: #4b5563;
+    background-color: #f3f4f6;
+}
+
+.point-reason {
+    min-width: 240px;
+    overflow-wrap: anywhere;
+}
+
+.point-history-empty {
+    margin-top: 24px;
+    padding: 28px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background-color: #f8fafc;
+    text-align: center;
+}
+
+.point-history-empty h2 {
+    margin-top: 0;
+}
+
+.point-history-empty p {
+    margin-bottom: 0;
+    color: #4b5563;
+}
+
+@media (max-width: 700px) {
+    .point-history-page {
+        margin: 24px auto;
+        padding: 20px;
+    }
+
+    .point-history-table th,
+    .point-history-table td {
+        padding: 10px;
+    }
+}
+
+
+/* -------------------------------------------------------------------------
    Driver Catalog
    ------------------------------------------------------------------------- */
 

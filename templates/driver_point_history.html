@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Point History</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+<main class="point-history-page">
+    <a class="back-link" href="{{ url_for('driver_dashboard') }}">
+        Back to Dashboard
+    </a>
+
+    <header class="point-history-header">
+        <div>
+            <h1>My Point History</h1>
+            <p>Review every addition and deduction recorded for your account.</p>
+        </div>
+    </header>
+
+    {% if point_history %}
+        <div class="point-history-table-wrap">
+            <table class="point-history-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Change</th>
+                        <th scope="col">Date</th>
+                        <th scope="col">Reason</th>
+                        <th scope="col">Sponsor</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for change in point_history %}
+                        <tr>
+                            <td>
+                                {% if change['points'] > 0 %}
+                                    <span class="point-change point-addition">
+                                        Addition +{{ change['points'] }}
+                                    </span>
+                                {% elif change['points'] < 0 %}
+                                    <span class="point-change point-deduction">
+                                        Deduction {{ change['points'] }}
+                                    </span>
+                                {% else %}
+                                    <span class="point-change point-neutral">
+                                        No change 0
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <time datetime="{{ change['created_at'].isoformat() }}">
+                                    {{ change['created_at'].strftime('%b %d, %Y at %I:%M %p') }}
+                                </time>
+                            </td>
+                            <td class="point-reason">{{ change['reason'] }}</td>
+                            <td>{{ change['sponsor_name'] }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <section class="point-history-empty" aria-live="polite">
+            <h2>No point history yet</h2>
+            <p>Additions and deductions will appear here after your sponsor records them.</p>
+        </section>
+    {% endif %}
+
+    <div class="actions">
+        <a class="button-link" href="{{ url_for('driver_profile') }}">
+            My Profile
+        </a>
+        <form class="inline-form" method="POST" action="{{ url_for('driver_logout') }}">
+            <button type="submit">Sign Out</button>
+        </form>
+    </div>
+</main>
+</body>
+</html>

@@ -33,6 +33,35 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 
+ACCOUNT_UNAVAILABLE_MESSAGE = (
+    "Your driver account is not currently available. "
+    "Contact your sponsor administrator for help."
+)
+PASSWORD_MIN_LENGTH = 12
+
+
+def get_password_validation_errors(password):
+    """Return each unmet password-complexity requirement."""
+
+    errors = []
+
+    if len(password) < PASSWORD_MIN_LENGTH:
+        errors.append(f"at least {PASSWORD_MIN_LENGTH} characters")
+    if not any(character.isupper() for character in password):
+        errors.append("an uppercase letter")
+    if not any(character.islower() for character in password):
+        errors.append("a lowercase letter")
+    if not any(character.isdigit() for character in password):
+        errors.append("a number")
+    if not any(
+        not character.isalnum() and not character.isspace()
+        for character in password
+    ):
+        errors.append("a special character")
+
+    return errors
+
+
 @app.get("/")
 def home():
     try:
@@ -122,6 +151,33 @@ def driver_required(function):
         if session.get("role") != "DRIVER":
             return "Access denied.", 403
 
+        try:
+            active_driver = db.session.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM app_user AS u
+                    JOIN driver_profile AS d
+                      ON d.user_id = u.user_id
+                    JOIN sponsor_org AS s
+                      ON s.sponsor_org_id = d.sponsor_org_id
+                    WHERE u.user_id = :user_id
+                      AND u.role = 'DRIVER'
+                      AND u.status = 'ACTIVE'
+                      AND s.status = 'ACTIVE'
+                    """
+                ),
+                {"user_id": session["user_id"]},
+            ).first()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("Driver account verification failed")
+            return "Unable to verify driver account right now.", 500
+
+        if active_driver is None:
+            session.clear()
+            return ACCOUNT_UNAVAILABLE_MESSAGE, 403
+
         return function(*args, **kwargs)
 
     return protected_function
@@ -161,7 +217,7 @@ def login():
             user = db.session.execute(
                 text(
                     """
-                    SELECT u.user_id, u.role, u.password_hash,
+                    SELECT u.user_id, u.role, u.password_hash, u.status,
                            CASE
                                WHEN u.role = 'DRIVER'
                                    THEN d.sponsor_org_id
@@ -171,7 +227,6 @@ def login():
                     LEFT JOIN driver_profile AS d
                       ON d.user_id = u.user_id
                     WHERE u.email = :email
-                      AND u.status = 'ACTIVE'
                     """
                 ),
                 {"email": email},
@@ -187,12 +242,19 @@ def login():
             )
 
         home_page = ROLE_HOME_PAGES.get(user["role"]) if user else None
-        if (
+        credentials_are_valid = (
             user is not None
             and home_page is not None
             and user["password_hash"] is not None
             and check_password_hash(user["password_hash"], password)
-        ):
+        )
+
+        if credentials_are_valid and user["status"] != "ACTIVE":
+            if user["role"] == "DRIVER":
+                message = ACCOUNT_UNAVAILABLE_MESSAGE
+            else:
+                message = "Invalid email or password."
+        elif credentials_are_valid:
             session["user_id"] = user["user_id"]
             session["role"] = user["role"]
 
@@ -203,7 +265,8 @@ def login():
 
         # Use one response for unknown, inactive, and incorrect-password
         # accounts so the form does not reveal whether an email is registered.
-        message = "Invalid email or password."
+        if not credentials_are_valid:
+            message = "Invalid email or password."
 
     return render_template(
         "driver_login.html",
@@ -793,14 +856,13 @@ def driver_login():
             user = db.session.execute(
                 text(
                     """
-                    SELECT u.user_id, u.password_hash,
+                    SELECT u.user_id, u.password_hash, u.status,
                            d.sponsor_org_id
                     FROM app_user AS u
                     JOIN driver_profile AS d
                       ON d.user_id = u.user_id
                     WHERE u.email = :email
                       AND u.role = 'DRIVER'
-                      AND u.status = 'ACTIVE'
                     """
                 ),
                 {"email": email},
@@ -815,11 +877,15 @@ def driver_login():
                 email=email,
             )
 
-        if (
+        credentials_are_valid = (
             user is not None
             and user["password_hash"] is not None
             and check_password_hash(user["password_hash"], password)
-        ):
+        )
+
+        if credentials_are_valid and user["status"] != "ACTIVE":
+            message = ACCOUNT_UNAVAILABLE_MESSAGE
+        elif credentials_are_valid:
             session["user_id"] = user["user_id"]
             session["role"] = "DRIVER"
             session["sponsor_org_id"] = user["sponsor_org_id"]
@@ -827,7 +893,8 @@ def driver_login():
 
         # Keep the response identical for unknown, inactive, non-driver, and
         # incorrect-password accounts so the page does not reveal membership.
-        message = "Invalid email or password."
+        if not credentials_are_valid:
+            message = "Invalid email or password."
 
     return render_template(
         "driver_login.html",
@@ -840,6 +907,40 @@ def driver_login():
 @driver_required
 def driver_dashboard():
     return render_template("driver_dashboard.html")
+
+
+# 22580, 23861, 23864, 23866 & 23868 - Driver point history
+
+@app.get("/driver/point-history")
+@driver_required
+def driver_point_history():
+    try:
+        point_history = db.session.execute(
+            text(
+                """
+                SELECT pc.point_change_id,
+                       pc.points,
+                       pc.reason,
+                       pc.created_at,
+                       s.name AS sponsor_name
+                FROM point_change AS pc
+                JOIN sponsor_org AS s
+                  ON s.sponsor_org_id = pc.sponsor_org_id
+                WHERE pc.driver_user_id = :driver_user_id
+                ORDER BY pc.created_at DESC, pc.point_change_id DESC
+                """
+            ),
+            {"driver_user_id": session["user_id"]},
+        ).mappings().all()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver point history database error")
+        return "Unable to load point history right now.", 500
+
+    return render_template(
+        "driver_point_history.html",
+        point_history=point_history,
+    )
 
 
 # 22367 & 22368 - View and update the authenticated driver's profile
@@ -1159,8 +1260,10 @@ def catalog_items_api():
 def set_password(email):
     """Hash and store a password for an existing user."""
     password = click.prompt("New password", hide_input=True, confirmation_prompt=True)
-    if len(password) < 8:
-        raise click.ClickException("Password must be at least 8 characters.")
+    validation_errors = get_password_validation_errors(password)
+    if validation_errors:
+        requirements = ", ".join(validation_errors)
+        raise click.ClickException(f"Password must include {requirements}.")
 
     result = db.session.execute(
         text("UPDATE app_user SET password_hash = :hash WHERE email = :email"),
