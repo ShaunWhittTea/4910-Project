@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Admin Profile</title>
+    <title>Admin Home</title>
 
     <link
         rel="stylesheet"
@@ -23,6 +23,12 @@
             <i class="fa-solid fa-car"></i>
             <span class="brand-name">WIDE LOAD</span>
         </div>
+
+        <div class="nav-links">
+            <a href="{{ url_for('admin_profile') }}" class="about-link">
+                Profile
+            </a>
+
             <form
                 action="{{ url_for('logout') }}"
                 method="POST"
@@ -37,11 +43,42 @@
     </nav>
 
 
-    <div class="admin-header">
-        <h1>Admin Profile</h1>
-    </div>
 
-    <p>Welcome to the admin page.</p>
+    <section class="admin-management">
+
+        <h2>User Management</h2>
+
+        <div class="admin-management-options">
+
+            <a
+                href="{{ url_for('admin_create_driver') }}"
+                class="admin-management-card"
+            >
+                <h3>Create Driver</h3>
+                <p>Create a new driver and assign them to a sponsor organization.</p>
+            </a>
+
+
+            <a
+                href="{{ url_for('admin_create_sponsor') }}"
+                class="admin-management-card"
+            >
+                <h3>Create Sponsor</h3>
+                <p>Create a new sponsor and assign or create an organization.</p>
+            </a>
+
+
+            <a
+                href="{{ url_for('admin_create_admin') }}"
+                class="admin-management-card"
+            >
+                <h3>Create Admin</h3>
+                <p>Create another administrator account.</p>
+            </a>
+
+        </div>
+
+    </section>
 
 </body>
 

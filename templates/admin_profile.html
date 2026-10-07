@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin Profile</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<main class="container">
+
+    <h1>My Admin Profile</h1>
+
+    {% if message %}
+        <p class="message" role="status">{{ message }}</p>
+    {% endif %}
+
+    <form method="POST">
+
+        <label for="first_name">First Name</label>
+        <input
+            type="text"
+            id="first_name"
+            value="{{ user['first_name'] }}"
+            readonly
+        >
+
+        <label for="last_name">Last Name</label>
+        <input
+            type="text"
+            id="last_name"
+            value="{{ user['last_name'] }}"
+            readonly
+        >
+
+        <label for="email">Email</label>
+        <input
+            type="email"
+            id="email"
+            value="{{ user['email'] }}"
+            readonly
+        >
+
+        <label for="phone">Phone</label>
+        <input
+            type="tel"
+            id="phone"
+            name="phone"
+            value="{{ user['phone'] or '' }}"
+            maxlength="40"
+            autocomplete="tel"
+        >
+
+        <button type="submit">Save Phone Number</button>
+
+    </form>
+
+    <div class="actions">
+
+        <a class="button-link" href="{{ url_for('admin_update') }}">
+            Update Password
+        </a>
+
+        <a class="button-link" href="{{ url_for('admin_home') }}">
+            Back to Admin Home
+        </a>
+
+        <form
+            class="inline-form"
+            method="POST"
+            action="{{ url_for('logout') }}"
+            onsubmit="return confirm('Are you sure you want to log out?');"
+        >
+            <button type="submit">Sign Out</button>
+        </form>
+
+    </div>
+
+</main>
+
+</body>
+</html>

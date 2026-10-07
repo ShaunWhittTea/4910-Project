@@ -405,6 +405,454 @@ def admin_home():
 
     return render_template("admin_home.html")
 
+@app.route("/admin/profile", methods=["GET", "POST"])
+def admin_profile():
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    user_id = session["user_id"]
+    message = None
+
+    # Only allow the phone number to be updated
+    if request.method == "POST":
+        phone = request.form.get("phone", "").strip()
+
+        db.session.execute(
+            text(
+                """
+                UPDATE app_user
+                SET phone = :phone
+                WHERE user_id = :user_id
+                  AND role = 'ADMIN'
+                """
+            ),
+            {
+                "phone": phone or None,
+                "user_id": user_id
+            }
+        )
+
+        db.session.commit()
+        message = "Phone number updated successfully."
+
+    # Get the admin's profile information
+    user = db.session.execute(
+        text(
+            """
+            SELECT
+                user_id,
+                first_name,
+                last_name,
+                email,
+                phone
+            FROM app_user
+            WHERE user_id = :user_id
+              AND role = 'ADMIN'
+            """
+        ),
+        {"user_id": user_id}
+    ).mappings().first()
+
+    if user is None:
+        return "Admin profile not found.", 404
+
+    return render_template(
+        "admin_profile.html",
+        user=user,
+        message=message
+    )
+
+@app.route("/admin/update", methods=["GET", "POST"])
+def admin_update():
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    user_id = session["user_id"]
+    message = None
+
+    if request.method == "POST":
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        # Get the current password hash for this admin
+        user = db.session.execute(
+            text(
+                """
+                SELECT password_hash
+                FROM app_user
+                WHERE user_id = :user_id
+                  AND role = 'ADMIN'
+                """
+            ),
+            {"user_id": user_id}
+        ).mappings().first()
+
+        if user is None:
+            return "Admin account not found.", 404
+
+        # Check the current password
+        if not check_password_hash(
+            user["password_hash"],
+            current_password
+        ):
+            message = "Current password is incorrect."
+
+        # Make sure the new password is long enough
+        elif len(new_password) < 8:
+            message = "New password must be at least 8 characters."
+
+        # Make sure both new passwords match
+        elif new_password != confirm_password:
+            message = "New passwords do not match."
+
+        else:
+            # Hash the new password
+            new_password_hash = generate_password_hash(new_password)
+
+            # Store the new hash in the database
+            db.session.execute(
+                text(
+                    """
+                    UPDATE app_user
+                    SET password_hash = :password_hash
+                    WHERE user_id = :user_id
+                      AND role = 'ADMIN'
+                    """
+                ),
+                {
+                    "password_hash": new_password_hash,
+                    "user_id": user_id
+                }
+            )
+
+            db.session.commit()
+
+            message = "Password updated successfully."
+
+    return render_template(
+        "admin_update.html",
+        message=message
+    )
+    
+@app.route("/admin/create-driver", methods=["GET", "POST"])
+def admin_create_driver():
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    message = None
+
+    # Get all active sponsor organizations for the dropdown
+    sponsors = db.session.execute(
+        text(
+            """
+            SELECT sponsor_org_id, name
+            FROM sponsor_org
+            WHERE status = 'ACTIVE'
+            ORDER BY name
+            """
+        )
+    ).mappings().all()
+
+    if request.method == "POST":
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        email = request.form.get("email", "").strip()
+        phone = request.form.get("phone", "").strip()
+        password = request.form.get("password", "")
+        shipping_address = request.form.get("shipping_address", "").strip()
+        sponsor_org_id = request.form.get("sponsor_org_id")
+
+        # Make sure the email is not already being used
+        existing_user = db.session.execute(
+            text(
+                """
+                SELECT user_id
+                FROM app_user
+                WHERE email = :email
+                """
+            ),
+            {"email": email}
+        ).mappings().first()
+
+        if existing_user:
+            message = "An account with that email already exists."
+
+        elif len(password) < 8:
+            message = "Password must be at least 8 characters."
+
+        else:
+            password_hash = generate_password_hash(password)
+
+            try:
+                # Create the app_user account
+                result = db.session.execute(
+                    text(
+                        """
+                        INSERT INTO app_user
+                            (role, email, password_hash, first_name,
+                             last_name, phone, status)
+                        VALUES
+                            ('DRIVER', :email, :password_hash, :first_name,
+                             :last_name, :phone, 'ACTIVE')
+                        """
+                    ),
+                    {
+                        "email": email,
+                        "password_hash": password_hash,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "phone": phone or None
+                    }
+                )
+
+                # Get the new driver's user_id
+                new_user_id = result.lastrowid
+
+                # Create the driver's profile
+                db.session.execute(
+                    text(
+                        """
+                        INSERT INTO driver_profile
+                            (user_id, sponsor_org_id, point_balance,
+                             shipping_address)
+                        VALUES
+                            (:user_id, :sponsor_org_id, 0,
+                             :shipping_address)
+                        """
+                    ),
+                    {
+                        "user_id": new_user_id,
+                        "sponsor_org_id": sponsor_org_id,
+                        "shipping_address": shipping_address or None
+                    }
+                )
+
+                db.session.commit()
+                message = "Driver created successfully."
+
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Error creating driver")
+                message = "Unable to create driver."
+
+    return render_template(
+        "admin_create_driver.html",
+        sponsors=sponsors,
+        message=message
+    )
+    
+@app.route("/admin/create-admin", methods=["GET", "POST"])
+def admin_create_admin():
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    message = None
+
+    if request.method == "POST":
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        email = request.form.get("email", "").strip()
+        phone = request.form.get("phone", "").strip()
+        password = request.form.get("password", "")
+
+        # Check whether the email already exists
+        existing_user = db.session.execute(
+            text(
+                """
+                SELECT user_id
+                FROM app_user
+                WHERE email = :email
+                """
+            ),
+            {"email": email}
+        ).mappings().first()
+
+        if existing_user:
+            message = "An account with that email already exists."
+
+        elif len(password) < 8:
+            message = "Password must be at least 8 characters."
+
+        else:
+            password_hash = generate_password_hash(password)
+
+            try:
+                db.session.execute(
+                    text(
+                        """
+                        INSERT INTO app_user
+                            (role, email, password_hash,
+                             first_name, last_name, phone, status)
+                        VALUES
+                            ('ADMIN', :email, :password_hash,
+                             :first_name, :last_name, :phone, 'ACTIVE')
+                        """
+                    ),
+                    {
+                        "email": email,
+                        "password_hash": password_hash,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "phone": phone or None
+                    }
+                )
+
+                db.session.commit()
+                message = "Admin created successfully."
+
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Error creating admin")
+                message = "Unable to create admin."
+
+    return render_template(
+        "admin_create_admin.html",
+        message=message
+    )
+
+@app.route("/admin/create-sponsor", methods=["GET", "POST"])
+def admin_create_sponsor():
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    message = None
+
+    # Get existing active sponsor organizations
+    organizations = db.session.execute(
+        text(
+            """
+            SELECT sponsor_org_id, name
+            FROM sponsor_org
+            WHERE status = 'ACTIVE'
+            ORDER BY name
+            """
+        )
+    ).mappings().all()
+
+    if request.method == "POST":
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        email = request.form.get("email", "").strip()
+        phone = request.form.get("phone", "").strip()
+        password = request.form.get("password", "")
+        organization_option = request.form.get("organization_option")
+
+        existing_user = db.session.execute(
+            text(
+                """
+                SELECT user_id
+                FROM app_user
+                WHERE email = :email
+                """
+            ),
+            {"email": email}
+        ).mappings().first()
+
+        if existing_user:
+            message = "An account with that email already exists."
+
+        elif len(password) < 8:
+            message = "Password must be at least 8 characters."
+
+        else:
+            password_hash = generate_password_hash(password)
+
+            try:
+                # Create a new organization if NEW was selected
+                if organization_option == "NEW":
+                    organization_name = request.form.get(
+                        "organization_name", ""
+                    ).strip()
+
+                    point_dollar_value = request.form.get(
+                        "point_dollar_value", "0.0100"
+                    )
+
+                    if not organization_name:
+                        return render_template(
+                            "admin_create_sponsor.html",
+                            organizations=organizations,
+                            message="Organization name is required."
+                        )
+
+                    result = db.session.execute(
+                        text(
+                            """
+                            INSERT INTO sponsor_org
+                                (name, contact_email, phone,
+                                 point_dollar_value, status)
+                            VALUES
+                                (:name, :contact_email, :phone,
+                                 :point_dollar_value, 'ACTIVE')
+                            """
+                        ),
+                        {
+                            "name": organization_name,
+                            "contact_email": email,
+                            "phone": phone or None,
+                            "point_dollar_value": point_dollar_value
+                        }
+                    )
+
+                    sponsor_org_id = result.lastrowid
+
+                else:
+                    # Use the existing organization
+                    sponsor_org_id = organization_option
+
+                # Create the Sponsor account
+                db.session.execute(
+                    text(
+                        """
+                        INSERT INTO app_user
+                            (role, email, password_hash,
+                             first_name, last_name, phone,
+                             status, sponsor_org_id)
+                        VALUES
+                            ('SPONSOR', :email, :password_hash,
+                             :first_name, :last_name, :phone,
+                             'ACTIVE', :sponsor_org_id)
+                        """
+                    ),
+                    {
+                        "email": email,
+                        "password_hash": password_hash,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "phone": phone or None,
+                        "sponsor_org_id": sponsor_org_id
+                    }
+                )
+
+                db.session.commit()
+                message = "Sponsor created successfully."
+
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Error creating sponsor")
+                message = "Unable to create sponsor."
+
+    return render_template(
+        "admin_create_sponsor.html",
+        organizations=organizations,
+        message=message
+    )
 # 25135 - User Profile Editing and Saving
 
 @app.route("/sponsor/profile", methods=["GET", "POST"])
