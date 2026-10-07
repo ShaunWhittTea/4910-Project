@@ -7,10 +7,25 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import URL, text
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
+from product_api import (
+    EbayApiError,
+    EbayProductApiClient,
+    FixtureProductApiClient,
+)
 
 load_dotenv()
 
 app = Flask(__name__)
+
+app.config["PRODUCT_API_PROVIDER"] = os.getenv(
+    "PRODUCT_API_PROVIDER", "fixture"
+).strip().lower()
+
+app.config["EBAY_CLIENT_ID"] = os.getenv("EBAY_CLIENT_ID", "").strip()
+app.config["EBAY_CLIENT_SECRET"] = os.getenv("EBAY_CLIENT_SECRET", "").strip()
+app.config["EBAY_SANDBOX"] = os.getenv(
+    "EBAY_SANDBOX", "true"
+).strip().lower() == "true"
 
 # 23319 - Protect stored passwords / sessions
 app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
@@ -289,6 +304,95 @@ def logout():
 @sponsor_required
 def sponsor_dashboard():
     return render_template("sponsor_dashboard.html")
+
+def get_product_search_client():
+    cached_client = app.extensions.get("product_search_client")
+    if cached_client is not None:
+        return cached_client
+
+    provider = app.config["PRODUCT_API_PROVIDER"]
+
+    if provider == "fixture":
+        client = FixtureProductApiClient()
+    elif provider == "ebay":
+        client = EbayProductApiClient(
+            app.config["EBAY_CLIENT_ID"],
+            app.config["EBAY_CLIENT_SECRET"],
+            sandbox=app.config["EBAY_SANDBOX"],
+        )
+    else:
+        raise ValueError("Unsupported product API provider")
+
+    app.extensions["product_search_client"] = client
+    return client
+
+
+@app.get("/sponsor/products/search")
+@sponsor_required
+def sponsor_product_search():
+    try:
+        sponsor = db.session.execute(
+            text(
+                """
+                SELECT u.user_id
+                FROM app_user AS u
+                JOIN sponsor_org AS so
+                    ON so.sponsor_org_id = u.sponsor_org_id
+                WHERE u.user_id = :user_id
+                  AND u.role = 'SPONSOR'
+                  AND u.status = 'ACTIVE'
+                  AND so.status = 'ACTIVE'
+                """
+            ),
+            {"user_id": session["user_id"]},
+        ).first()
+    except Exception:
+        db.session.rollback()
+        app.logger.error("Sponsor search authorization lookup failed")
+        return "Unable to verify sponsor access right now.", 503
+
+    if sponsor is None:
+        return "Access denied.", 403
+
+    query = request.args.get("q", "").strip()
+    products = []
+    error = None
+    searched = False
+    status = 200
+
+    provider = app.config["PRODUCT_API_PROVIDER"]
+    source_label = (
+        "Fixture development data"
+        if provider == "fixture"
+        else (
+            "eBay Sandbox"
+            if app.config["EBAY_SANDBOX"]
+            else "eBay Production"
+        )
+    )
+
+    if len(query) > 100:
+        error = "Please use a search query of 100 characters or fewer."
+        status = 400
+    elif query:
+        try:
+            products = get_product_search_client().search(query)
+            searched = True
+        except (EbayApiError, ValueError):
+            app.logger.error(
+                "Product search failed for provider %s", provider
+            )
+            error = "Product search is unavailable. Please try again later."
+            status = 503
+
+    return render_template(
+        "sponsor_product_search.html",
+        query=query,
+        products=products,
+        error=error,
+        searched=searched,
+        source_label=source_label,
+    ), status
 
 # - admin can login
 @app.get("/admin/home")

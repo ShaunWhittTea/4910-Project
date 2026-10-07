@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Search products</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 1100px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        .products {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        .product {
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-wrap: anywhere;
+        }
+        .product img {
+            width: 100%;
+            height: 180px;
+            object-fit: contain;
+        }
+        .error { color: #a00000; }
+    </style>
+</head>
+<body>
+    <a href="{{ url_for('sponsor_dashboard') }}">Back to dashboard</a>
+
+    <h1>Search products</h1>
+    <p>Source: {{ source_label }}</p>
+    <p>Search for candidate products. Results are not added to your catalog.</p>
+
+    <form method="get" action="{{ url_for('sponsor_product_search') }}">
+        <label for="q">Product keyword</label>
+        <input
+            id="q"
+            name="q"
+            type="search"
+            value="{{ query }}"
+            maxlength="100"
+            placeholder="For example: thermos"
+        >
+        <button type="submit">Search</button>
+    </form>
+
+    {% if error %}
+        <p class="error" role="alert">{{ error }}</p>
+    {% elif searched and not products %}
+        <p>No eligible USD products were returned for this search.</p>
+    {% elif not searched %}
+        <p>Enter a keyword to search.</p>
+    {% endif %}
+
+    {% if products %}
+        <p>{{ products | length }} products shown.</p>
+        <section class="products" aria-label="Search results">
+            {% for product in products %}
+                <article class="product">
+                    {% if product.image_url
+                          and product.image_url.startswith('https://') %}
+                        <img
+                            src="{{ product.image_url }}"
+                            alt="{{ product.title }}"
+                            loading="lazy"
+                            referrerpolicy="no-referrer"
+                        >
+                    {% else %}
+                        <p>No image available</p>
+                    {% endif %}
+
+                    <h2>{{ product.title }}</h2>
+                    <p>${{ "%.2f" | format(product.price_usd) }} USD</p>
+
+                    {% if product.description %}
+                        <p>{{ product.description }}</p>
+                    {% endif %}
+
+                    <p>Availability: {{ product.availability }}</p>
+                    <small>External ID: {{ product.external_product_id }}</small>
+                </article>
+            {% endfor %}
+        </section>
+    {% endif %}
+</body>
+</html>
