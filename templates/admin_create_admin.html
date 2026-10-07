@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Create Admin</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Create New Admin</h1>
+
+    <p>Create a new administrator account.</p>
+
+    {% if message %}
+        <p class="message" role="status">{{ message }}</p>
+    {% endif %}
+
+    <form method="POST">
+
+        <label for="first_name">First Name</label>
+        <input
+            type="text"
+            id="first_name"
+            name="first_name"
+            maxlength="80"
+            required
+        >
+
+        <label for="last_name">Last Name</label>
+        <input
+            type="text"
+            id="last_name"
+            name="last_name"
+            maxlength="80"
+            required
+        >
+
+        <label for="email">Email</label>
+        <input
+            type="email"
+            id="email"
+            name="email"
+            maxlength="255"
+            required
+        >
+
+        <label for="phone">Phone</label>
+        <input
+            type="tel"
+            id="phone"
+            name="phone"
+            maxlength="40"
+        >
+
+        <label for="password">Temporary Password</label>
+        <input
+            type="password"
+            id="password"
+            name="password"
+            minlength="8"
+            required
+        >
+
+        <button type="submit">
+            Create Admin
+        </button>
+
+    </form>
+
+    <div class="actions">
+        <a class="button-link" href="{{ url_for('admin_home') }}">
+            Back to Admin Home
+        </a>
+    </div>
+
+</div>
+
+</body>
+</html>

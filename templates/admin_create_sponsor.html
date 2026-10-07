@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Create Sponsor</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Create New Sponsor</h1>
+
+    <p>
+        Create a sponsor account and assign them to an existing
+        organization or create a new organization.
+    </p>
+
+    {% if message %}
+        <p class="message" role="status">
+            {{ message }}
+        </p>
+    {% endif %}
+
+    <form method="POST">
+
+        <h2>Sponsor Information</h2>
+
+        <label for="first_name">First Name</label>
+        <input
+            type="text"
+            id="first_name"
+            name="first_name"
+            maxlength="80"
+            required
+        >
+
+        <label for="last_name">Last Name</label>
+        <input
+            type="text"
+            id="last_name"
+            name="last_name"
+            maxlength="80"
+            required
+        >
+
+        <label for="email">Email</label>
+        <input
+            type="email"
+            id="email"
+            name="email"
+            maxlength="255"
+            required
+        >
+
+        <label for="phone">Phone</label>
+        <input
+            type="tel"
+            id="phone"
+            name="phone"
+            maxlength="40"
+        >
+
+        <label for="password">Temporary Password</label>
+        <input
+            type="password"
+            id="password"
+            name="password"
+            minlength="8"
+            required
+        >
+
+
+        <h2>Organization Information</h2>
+
+        <label for="organization_option">
+            Sponsor Organization
+        </label>
+
+        <select
+            id="organization_option"
+            name="organization_option"
+            onchange="toggleNewOrganization()"
+            required
+        >
+            <option value="">
+                Select an Organization
+            </option>
+
+            {% for organization in organizations %}
+                <option value="{{ organization['sponsor_org_id'] }}">
+                    {{ organization['name'] }}
+                </option>
+            {% endfor %}
+
+            <option value="NEW">
+                + Create New Organization
+            </option>
+        </select>
+
+
+        <div id="new-organization-fields" style="display: none;">
+
+            <label for="organization_name">
+                New Organization Name
+            </label>
+
+            <input
+                type="text"
+                id="organization_name"
+                name="organization_name"
+                maxlength="120"
+            >
+
+            <label for="point_dollar_value">
+                Point Dollar Value
+            </label>
+
+            <input
+                type="number"
+                id="point_dollar_value"
+                name="point_dollar_value"
+                min="0"
+                step="0.0001"
+                value="0.0100"
+            >
+
+        </div>
+
+
+        <button type="submit">
+            Create Sponsor
+        </button>
+
+    </form>
+
+
+    <div class="actions">
+
+        <a
+            class="button-link"
+            href="{{ url_for('admin_home') }}"
+        >
+            Back to Admin Home
+        </a>
+
+    </div>
+
+</div>
+
+
+<script>
+    function toggleNewOrganization() {
+        const selection =
+            document.getElementById("organization_option").value;
+
+        const fields =
+            document.getElementById("new-organization-fields");
+
+        const organizationName =
+            document.getElementById("organization_name");
+
+        if (selection === "NEW") {
+            fields.style.display = "block";
+            organizationName.required = true;
+        } else {
+            fields.style.display = "none";
+            organizationName.required = false;
+        }
+    }
+</script>
+
+</body>
+
+</html>

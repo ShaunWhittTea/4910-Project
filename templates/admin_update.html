@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Update Password</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<main class="container">
+
+    <h1>Update Password</h1>
+
+    {% if message %}
+        <p class="message" role="alert">{{ message }}</p>
+    {% endif %}
+
+    <form method="POST">
+
+        <label for="current_password">Current Password</label>
+        <input
+            type="password"
+            id="current_password"
+            name="current_password"
+            autocomplete="current-password"
+            required
+        >
+
+        <label for="new_password">New Password</label>
+        <input
+            type="password"
+            id="new_password"
+            name="new_password"
+            minlength="8"
+            autocomplete="new-password"
+            required
+        >
+
+        <label for="confirm_password">Confirm New Password</label>
+        <input
+            type="password"
+            id="confirm_password"
+            name="confirm_password"
+            minlength="8"
+            autocomplete="new-password"
+            required
+        >
+
+        <button type="submit">Update Password</button>
+
+    </form>
+
+    <div class="actions">
+        <a class="button-link" href="{{ url_for('admin_profile') }}">
+            Back to Profile
+        </a>
+    </div>
+
+</main>
+
+</body>
+</html>
