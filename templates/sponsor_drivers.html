@@ -23,6 +23,10 @@
             <p><strong>Point Balance:</strong> {{ driver.point_balance }}</p>
             <p><strong>Shipping Address:</strong> {{ driver.shipping_address or "Not provided" }}</p>
 
+            <a href="{{ url_for('sponsor_edit_driver', driver_user_id=driver.user_id) }}">
+                <button type="button">Edit Driver</button>
+            </a>
+
             <hr>
 
         {% endfor %}

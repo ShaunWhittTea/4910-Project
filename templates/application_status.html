@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Application Status</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Driver Application Status</h1>
+
+    {% if application.status == "PENDING" %}
+
+        <h2>Application Pending</h2>
+
+        <p>
+            Your application to
+            <strong>{{ application.organization_name }}</strong>
+            is currently under review.
+        </p>
+
+        <p>
+            Please check back later for an updated decision.
+        </p>
+
+    {% elif application.status == "REJECTED" %}
+
+        <h2>Application Not Approved</h2>
+
+        <p>
+            Your application to
+            <strong>{{ application.organization_name }}</strong>
+            was not approved at this time.
+        </p>
+
+    {% endif %}
+
+    <a href="{{ url_for('logout') }}">
+        <button type="button">Logout</button>
+    </a>
+
+</div>
+
+</body>
+</html>
