@@ -16,7 +16,7 @@
     >
 </head>
 
-<body>
+<body class="admin-page">
 
     <nav class="navbar">
         <div class="brand">
@@ -46,7 +46,6 @@
 
     <section class="admin-management">
 
-        <h2>User Management</h2>
 
         <div class="admin-management-options">
 
@@ -75,6 +74,15 @@
                 <h3>Create Admin</h3>
                 <p>Create another administrator account.</p>
             </a>
+            
+            <a
+                href="{{ url_for('admin_user_index') }}"
+                class="admin-management-card"
+            >
+            <i class="fa-solid fa-users"></i>
+            <h3>User Index</h3>
+            <p>View and search all Admins, Sponsors, and Drivers.</p>
+</a>
 
         </div>
 

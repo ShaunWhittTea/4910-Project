@@ -541,6 +541,150 @@ def admin_update():
         message=message
     )
     
+
+@app.route("/admin/users")
+def admin_user_index():
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    users = db.session.execute(
+        text(
+            """
+            SELECT
+                u.user_id,
+                u.role,
+                u.first_name,
+                u.last_name,
+                u.email,
+                so.sponsor_org_id,
+                so.name AS organization_name
+
+            FROM app_user AS u
+
+            LEFT JOIN driver_profile AS dp
+                ON u.user_id = dp.user_id
+                AND u.role = 'DRIVER'
+
+            LEFT JOIN sponsor_org AS so
+                ON so.sponsor_org_id =
+                    CASE
+                        WHEN u.role = 'DRIVER'
+                            THEN dp.sponsor_org_id
+                        WHEN u.role = 'SPONSOR'
+                            THEN u.sponsor_org_id
+                        ELSE NULL
+                    END
+
+            ORDER BY
+                u.last_name ASC,
+                u.first_name ASC,
+                u.email ASC
+            """
+        )
+    ).mappings().all()
+
+    return render_template(
+        "admin_user_index.html",
+        users=users
+    )
+
+
+@app.route("/admin/users/<int:user_id>")
+def admin_user_detail(user_id):
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    user = db.session.execute(
+        text(
+            """
+            SELECT
+                u.user_id,
+                u.role,
+                u.first_name,
+                u.last_name,
+                u.email,
+                u.phone,
+                u.status,
+                u.created_at,
+
+                dp.point_balance,
+                dp.shipping_address,
+
+                so.sponsor_org_id,
+                so.name AS organization_name
+
+            FROM app_user AS u
+
+            LEFT JOIN driver_profile AS dp
+                ON u.user_id = dp.user_id
+                AND u.role = 'DRIVER'
+
+            LEFT JOIN sponsor_org AS so
+                ON so.sponsor_org_id =
+                    CASE
+                        WHEN u.role = 'DRIVER'
+                            THEN dp.sponsor_org_id
+                        WHEN u.role = 'SPONSOR'
+                            THEN u.sponsor_org_id
+                        ELSE NULL
+                    END
+
+            WHERE u.user_id = :user_id
+            """
+        ),
+        {"user_id": user_id}
+    ).mappings().first()
+
+    if user is None:
+        return "User not found.", 404
+
+    return render_template(
+        "admin_user_detail.html",
+        user=user
+    )
+
+
+@app.route("/admin/organizations/<int:sponsor_org_id>")
+def admin_organization_detail(sponsor_org_id):
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    organization = db.session.execute(
+        text(
+            """
+            SELECT
+                sponsor_org_id,
+                name,
+                contact_email,
+                phone,
+                point_dollar_value,
+                created_at
+
+            FROM sponsor_org
+
+            WHERE sponsor_org_id = :sponsor_org_id
+            """
+        ),
+        {"sponsor_org_id": sponsor_org_id}
+    ).mappings().first()
+
+    if organization is None:
+        return "Sponsor organization not found.", 404
+
+    return render_template(
+        "admin_organization_detail.html",
+        organization=organization
+    )
+
 @app.route("/admin/create-driver", methods=["GET", "POST"])
 def admin_create_driver():
     if session.get("user_id") is None:
