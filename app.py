@@ -2,7 +2,7 @@ import os
 import click
 
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, session, redirect, url_for
+from flask import Flask, flash, render_template, request, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import URL, text
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -2050,6 +2050,213 @@ def driver_point_history():
     )
 
 
+# 23886, 23887, 23888, 23890 & 23892 - Driver purchase self-service
+
+@app.get("/driver/orders")
+@driver_required
+def driver_orders():
+    """Show the authenticated driver's complete purchase history."""
+
+    try:
+        orders = db.session.execute(
+            text(
+                """
+                SELECT po.order_id,
+                       po.status,
+                       po.total_points,
+                       po.total_usd,
+                       po.created_at,
+                       s.name AS sponsor_name
+                FROM purchase_order AS po
+                JOIN sponsor_org AS s
+                  ON s.sponsor_org_id = po.sponsor_org_id
+                WHERE po.driver_user_id = :driver_user_id
+                ORDER BY po.created_at DESC, po.order_id DESC
+                """
+            ),
+            {"driver_user_id": session["user_id"]},
+        ).mappings().all()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver purchase history database error")
+        return "Unable to load purchase history right now.", 500
+
+    return render_template(
+        "driver_orders.html",
+        orders=orders,
+    )
+
+
+@app.get("/driver/orders/<int:order_id>")
+@driver_required
+def driver_order_detail(order_id):
+    """Show one purchase and its line items when it belongs to the driver."""
+
+    parameters = {
+        "order_id": order_id,
+        "driver_user_id": session["user_id"],
+    }
+
+    try:
+        order = db.session.execute(
+            text(
+                """
+                SELECT po.order_id,
+                       po.status,
+                       po.total_points,
+                       po.total_usd,
+                       po.created_at,
+                       s.name AS sponsor_name
+                FROM purchase_order AS po
+                JOIN sponsor_org AS s
+                  ON s.sponsor_org_id = po.sponsor_org_id
+                WHERE po.order_id = :order_id
+                  AND po.driver_user_id = :driver_user_id
+                """
+            ),
+            parameters,
+        ).mappings().first()
+
+        if order is None:
+            return "Order not found.", 404
+
+        order_lines = db.session.execute(
+            text(
+                """
+                SELECT ol.order_line_id,
+                       ol.external_product_id,
+                       ol.title,
+                       ol.quantity,
+                       ol.unit_price_usd,
+                       ol.unit_points
+                FROM order_line AS ol
+                JOIN purchase_order AS po
+                  ON po.order_id = ol.order_id
+                WHERE ol.order_id = :order_id
+                  AND po.driver_user_id = :driver_user_id
+                ORDER BY ol.order_line_id ASC
+                """
+            ),
+            parameters,
+        ).mappings().all()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver purchase detail database error")
+        return "Unable to load purchase details right now.", 500
+
+    return render_template(
+        "driver_order_detail.html",
+        order=order,
+        order_lines=order_lines,
+    )
+
+
+@app.post("/driver/orders/<int:order_id>/cancel")
+@driver_required
+def driver_cancel_order(order_id):
+    """Cancel an owned order only while it is still in PLACED status."""
+
+    parameters = {
+        "order_id": order_id,
+        "driver_user_id": session["user_id"],
+    }
+
+    try:
+        order = db.session.execute(
+            text(
+                """
+                SELECT order_id, status, total_points, sponsor_org_id
+                FROM purchase_order
+                WHERE order_id = :order_id
+                  AND driver_user_id = :driver_user_id
+                FOR UPDATE
+                """
+            ),
+            parameters,
+        ).mappings().first()
+
+        if order is None:
+            db.session.rollback()
+            return "Order not found.", 404
+
+        if order["status"] != "PLACED":
+            db.session.rollback()
+            flash(
+                "This order can no longer be canceled because it is not in "
+                "Placed status.",
+                "error",
+            )
+            return redirect(
+                url_for("driver_order_detail", order_id=order_id)
+            )
+
+        update_result = db.session.execute(
+            text(
+                """
+                UPDATE purchase_order
+                SET status = 'CANCELLED'
+                WHERE order_id = :order_id
+                  AND driver_user_id = :driver_user_id
+                  AND status = 'PLACED'
+                """
+            ),
+            parameters,
+        )
+
+        if update_result.rowcount != 1:
+            db.session.rollback()
+            flash(
+                "The order could not be canceled because its status changed. "
+                "Please review the current order status.",
+                "error",
+            )
+            return redirect(
+                url_for("driver_order_detail", order_id=order_id)
+            )
+
+        refund_parameters = {
+            **parameters,
+            "points": order["total_points"],
+            "sponsor_org_id": order["sponsor_org_id"],
+            "reason": f"Refund for canceled order #{order_id}",
+        }
+        refund_result = db.session.execute(
+            text(
+                """
+                UPDATE driver_profile
+                SET point_balance = point_balance + :points
+                WHERE user_id = :driver_user_id
+                """
+            ),
+            refund_parameters,
+        )
+        if refund_result.rowcount != 1:
+            raise RuntimeError("Driver balance was not updated")
+
+        db.session.execute(
+            text(
+                """
+                INSERT INTO point_change
+                    (driver_user_id, sponsor_org_id, actor_user_id,
+                     points, reason)
+                VALUES
+                    (:driver_user_id, :sponsor_org_id, :driver_user_id,
+                     :points, :reason)
+                """
+            ),
+            refund_parameters,
+        )
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver order cancellation failed")
+        return "Unable to cancel this order right now.", 500
+
+    flash(f"Order #{order_id} was canceled successfully.", "success")
+    return redirect(url_for("driver_order_detail", order_id=order_id))
+
+
 # 22367 & 22368 - View and update the authenticated driver's profile
 
 @app.route("/driver/profile", methods=["GET", "POST"])
@@ -2309,6 +2516,152 @@ def driver_catalog():
         total_items=total_items,
         total_pages=total_pages,
     )
+
+
+@app.post("/driver/catalog/<int:catalog_item_id>/purchase")
+@driver_required
+def driver_purchase_catalog_item(catalog_item_id):
+    """Purchase one active item from the authenticated driver's catalog."""
+
+    lookup_parameters = {
+        "catalog_item_id": catalog_item_id,
+        "driver_user_id": session["user_id"],
+    }
+
+    try:
+        item = db.session.execute(
+            text(
+                """
+                SELECT ci.catalog_item_id,
+                       ci.external_product_id,
+                       ci.title,
+                       ci.price_usd,
+                       dp.sponsor_org_id,
+                       dp.point_balance,
+                       CEILING(
+                           ci.price_usd / so.point_dollar_value
+                       ) AS points_price
+                FROM driver_profile AS dp
+                JOIN sponsor_org AS so
+                  ON so.sponsor_org_id = dp.sponsor_org_id
+                JOIN catalog_item AS ci
+                  ON ci.sponsor_org_id = dp.sponsor_org_id
+                WHERE dp.user_id = :driver_user_id
+                  AND ci.catalog_item_id = :catalog_item_id
+                  AND so.status = 'ACTIVE'
+                  AND ci.active = 1
+                FOR UPDATE
+                """
+            ),
+            lookup_parameters,
+        ).mappings().first()
+
+        if item is None:
+            db.session.rollback()
+            return "Catalog item not found.", 404
+
+        points_price = int(item["points_price"])
+        if item["point_balance"] < points_price:
+            db.session.rollback()
+            flash(
+                f"You need {points_price} points to purchase "
+                f"{item['title']}, but your balance is "
+                f"{item['point_balance']} points.",
+                "error",
+            )
+            return redirect(url_for("driver_catalog"))
+
+        purchase_parameters = {
+            "driver_user_id": session["user_id"],
+            "sponsor_org_id": item["sponsor_org_id"],
+            "catalog_item_id": item["catalog_item_id"],
+            "external_product_id": item["external_product_id"],
+            "title": item["title"],
+            "price_usd": item["price_usd"],
+            "points_price": points_price,
+            "reason": f"Catalog purchase: {item['title']}",
+        }
+
+        balance_result = db.session.execute(
+            text(
+                """
+                UPDATE driver_profile
+                SET point_balance = point_balance - :points_price
+                WHERE user_id = :driver_user_id
+                  AND sponsor_org_id = :sponsor_org_id
+                  AND point_balance >= :points_price
+                """
+            ),
+            purchase_parameters,
+        )
+        if balance_result.rowcount != 1:
+            db.session.rollback()
+            flash(
+                "Your point balance changed before the purchase completed. "
+                "Please review your balance and try again.",
+                "error",
+            )
+            return redirect(url_for("driver_catalog"))
+
+        order_result = db.session.execute(
+            text(
+                """
+                INSERT INTO purchase_order
+                    (driver_user_id, sponsor_org_id, placed_by_user_id,
+                     status, total_points, total_usd)
+                VALUES
+                    (:driver_user_id, :sponsor_org_id, :driver_user_id,
+                     'PLACED', :points_price, :price_usd)
+                """
+            ),
+            purchase_parameters,
+        )
+        order_id = order_result.lastrowid
+        if order_id is None:
+            raise RuntimeError("Purchase order ID was not returned")
+
+        line_parameters = {
+            **purchase_parameters,
+            "order_id": order_id,
+        }
+        db.session.execute(
+            text(
+                """
+                INSERT INTO order_line
+                    (order_id, external_product_id, title, quantity,
+                     unit_price_usd, unit_points)
+                VALUES
+                    (:order_id, :external_product_id, :title, 1,
+                     :price_usd, :points_price)
+                """
+            ),
+            line_parameters,
+        )
+        db.session.execute(
+            text(
+                """
+                INSERT INTO point_change
+                    (driver_user_id, sponsor_org_id, actor_user_id,
+                     points, reason)
+                VALUES
+                    (:driver_user_id, :sponsor_org_id, :driver_user_id,
+                     -:points_price, :reason)
+                """
+            ),
+            purchase_parameters,
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver catalog purchase failed")
+        return "Unable to complete this purchase right now.", 500
+
+    flash(
+        f"{item['title']} was purchased successfully for "
+        f"{points_price} points.",
+        "success",
+    )
+    return redirect(url_for("driver_order_detail", order_id=order_id))
 
 
 @app.get("/api/catalog/items")

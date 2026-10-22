@@ -23,6 +23,9 @@
         <a class="button-link" href="{{ url_for('driver_catalog') }}">
             Browse My Sponsor Catalog
         </a>
+        <a class="button-link" href="{{ url_for('driver_orders') }}">
+            My Purchases
+        </a>
         <form class="inline-form" method="POST" action="{{ url_for('driver_logout') }}">
             <button type="submit">Sign Out</button>
         </form>

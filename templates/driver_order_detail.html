@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order #{{ order.order_id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <main class="driver-orders-page">
+        <a class="back-link" href="{{ url_for('driver_orders') }}">
+            Back to Purchase History
+        </a>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div
+                    class="order-message{% if category == 'error' %} order-message-error{% endif %}"
+                    role="status"
+                >
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endwith %}
+
+        <header class="order-detail-header">
+            <div>
+                <h1>Order #{{ order.order_id }}</h1>
+                <p>Purchase details and current order status.</p>
+            </div>
+            <span class="order-status order-status-{{ order.status|lower }}">
+                {{ order.status|replace('_', ' ')|title }}
+            </span>
+        </header>
+
+        <section class="order-summary" aria-label="Order summary">
+            <div class="order-summary-card">
+                <strong>Order Date</strong>
+                <time datetime="{{ order.created_at.isoformat() }}">
+                    {{ order.created_at.strftime('%b %d, %Y at %I:%M %p') }}
+                </time>
+            </div>
+            <div class="order-summary-card">
+                <strong>Sponsor</strong>
+                {{ order.sponsor_name }}
+            </div>
+            <div class="order-summary-card">
+                <strong>Total Points</strong>
+                {{ order.total_points }}
+            </div>
+            <div class="order-summary-card">
+                <strong>Total Price</strong>
+                ${{ "%.2f"|format(order.total_usd) }}
+            </div>
+        </section>
+
+        <section class="order-lines-section">
+            <h2>Items</h2>
+            {% if order_lines %}
+                <div class="driver-orders-table-wrap">
+                    <table class="order-lines-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Item</th>
+                                <th scope="col">Quantity</th>
+                                <th scope="col">Points Each</th>
+                                <th scope="col">Points Used</th>
+                                <th scope="col">Price Each</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for line in order_lines %}
+                                <tr>
+                                    <td>{{ line.title }}</td>
+                                    <td>{{ line.quantity }}</td>
+                                    <td>{{ line.unit_points }}</td>
+                                    <td>{{ line.quantity * line.unit_points }}</td>
+                                    <td>${{ "%.2f"|format(line.unit_price_usd) }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <section class="order-lines-empty">
+                    <h2>No item details available</h2>
+                    <p>The order summary is still available above.</p>
+                </section>
+            {% endif %}
+        </section>
+
+        <section class="order-cancel-section">
+            {% if order.status == 'PLACED' %}
+                <p>
+                    This order can be canceled until your sponsor begins processing it.
+                </p>
+                <form
+                    method="POST"
+                    action="{{ url_for('driver_cancel_order', order_id=order.order_id) }}"
+                    onsubmit="return confirm('Cancel this order? This action cannot be undone.');"
+                >
+                    <button class="danger-button" type="submit">
+                        Cancel Order
+                    </button>
+                </form>
+            {% else %}
+                <p>
+                    This order cannot be canceled because its current status is
+                    <strong>{{ order.status|replace('_', ' ')|title }}</strong>.
+                </p>
+            {% endif %}
+        </section>
+
+        <div class="order-actions">
+            <a class="button-link" href="{{ url_for('driver_orders') }}">
+                Purchase History
+            </a>
+            <a class="button-link" href="{{ url_for('driver_dashboard') }}">
+                Dashboard
+            </a>
+        </div>
+    </main>
+</body>
+</html>

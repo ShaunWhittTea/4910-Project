@@ -312,6 +312,25 @@ button:hover {
     font-size: 0.95rem;
 }
 
+.catalog-purchase-form {
+    margin-top: 1rem;
+}
+
+.catalog-purchase-button {
+    width: 100%;
+    background: #1f5ea8;
+}
+
+.catalog-purchase-button:hover,
+.catalog-purchase-button:focus {
+    background: #17477e;
+}
+
+.catalog-purchase-button:focus-visible {
+    outline: 3px solid #f4b400;
+    outline-offset: 2px;
+}
+
 .catalog-pagination {
     display: flex;
     justify-content: center;
@@ -730,4 +749,212 @@ body {
 .admin-management-card p {
     font-size: 14px;
     line-height: 1.5;
+}
+
+/* DRIVER PURCHASE HISTORY AND DETAILS */
+
+.driver-orders-page {
+    width: min(1100px, calc(100% - 2rem));
+    margin: 2rem auto;
+}
+
+.driver-orders-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+
+.driver-orders-header h1,
+.order-detail-header h1 {
+    margin: 0 0 0.35rem;
+}
+
+.driver-orders-header p,
+.order-detail-header p {
+    margin: 0;
+    color: #4a5561;
+}
+
+.driver-orders-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #d5d9df;
+    border-radius: 0.65rem;
+    background: #ffffff;
+}
+
+.driver-orders-table,
+.order-lines-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.driver-orders-table th,
+.driver-orders-table td,
+.order-lines-table th,
+.order-lines-table td {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid #e3e6ea;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.driver-orders-table th,
+.order-lines-table th {
+    background: #0d294c;
+    color: #ffffff;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.driver-orders-table tbody tr:last-child td,
+.order-lines-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.order-status {
+    display: inline-block;
+    padding: 0.3rem 0.55rem;
+    border-radius: 999px;
+    background: #e7edf5;
+    color: #173f70;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.order-status-placed {
+    background: #e6f0ff;
+    color: #17477e;
+}
+
+.order-status-cancelled {
+    background: #f3e7e7;
+    color: #8b1e1e;
+}
+
+.order-status-shipped {
+    background: #fff3cd;
+    color: #6b5300;
+}
+
+.order-status-delivered {
+    background: #e3f4e8;
+    color: #176b36;
+}
+
+.order-link {
+    color: #1f5ea8;
+    font-weight: 700;
+}
+
+.order-link:hover,
+.order-link:focus {
+    color: #17477e;
+}
+
+.driver-orders-empty,
+.order-lines-empty {
+    padding: 2rem;
+    border: 1px solid #d5d9df;
+    border-radius: 0.65rem;
+    background: #f8fafc;
+    text-align: center;
+}
+
+.driver-orders-empty h2,
+.order-lines-empty h2 {
+    margin-top: 0;
+}
+
+.order-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+
+.order-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.order-summary-card {
+    padding: 1rem;
+    border: 1px solid #d5d9df;
+    border-radius: 0.65rem;
+    background: #ffffff;
+}
+
+.order-summary-card strong {
+    display: block;
+    margin-bottom: 0.4rem;
+    color: #4a5561;
+    font-size: 0.9rem;
+}
+
+.order-lines-section h2 {
+    margin-top: 0;
+}
+
+.order-cancel-section {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    border: 1px solid #d5d9df;
+    border-radius: 0.65rem;
+    background: #f8fafc;
+}
+
+.order-cancel-section p {
+    margin-top: 0;
+}
+
+.danger-button {
+    background: #9b1c1c;
+}
+
+.danger-button:hover,
+.danger-button:focus {
+    background: #741414;
+}
+
+.order-message {
+    margin: 1rem 0;
+    padding: 0.85rem 1rem;
+    border: 1px solid #9fb7a7;
+    border-radius: 0.45rem;
+    background: #edf8f0;
+    color: #195c2e;
+    font-weight: 600;
+}
+
+.order-message-error {
+    border-color: #d6a4a4;
+    background: #fff1f1;
+    color: #8b1e1e;
+}
+
+.order-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+@media (max-width: 700px) {
+    .driver-orders-header,
+    .order-detail-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .driver-orders-table th,
+    .driver-orders-table td,
+    .order-lines-table th,
+    .order-lines-table td {
+        padding: 0.7rem;
+    }
 }
