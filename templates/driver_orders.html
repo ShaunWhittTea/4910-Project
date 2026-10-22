@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Purchases</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <main class="driver-orders-page">
+        <a class="back-link" href="{{ url_for('driver_dashboard') }}">
+            Back to Dashboard
+        </a>
+
+        <header class="driver-orders-header">
+            <div>
+                <h1>My Purchases</h1>
+                <p>Review your orders, current statuses, and purchase details.</p>
+            </div>
+            <a class="button-link" href="{{ url_for('driver_catalog') }}">
+                Browse Catalog
+            </a>
+        </header>
+
+        {% if orders %}
+            <div class="driver-orders-table-wrap">
+                <table class="driver-orders-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Order</th>
+                            <th scope="col">Date</th>
+                            <th scope="col">Sponsor</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Points</th>
+                            <th scope="col">Price</th>
+                            <th scope="col">Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in orders %}
+                            <tr>
+                                <td>#{{ order.order_id }}</td>
+                                <td>
+                                    <time datetime="{{ order.created_at.isoformat() }}">
+                                        {{ order.created_at.strftime('%b %d, %Y at %I:%M %p') }}
+                                    </time>
+                                </td>
+                                <td>{{ order.sponsor_name }}</td>
+                                <td>
+                                    <span class="order-status order-status-{{ order.status|lower }}">
+                                        {{ order.status|replace('_', ' ')|title }}
+                                    </span>
+                                </td>
+                                <td>{{ order.total_points }}</td>
+                                <td>${{ "%.2f"|format(order.total_usd) }}</td>
+                                <td>
+                                    <a
+                                        class="order-link"
+                                        href="{{ url_for('driver_order_detail', order_id=order.order_id) }}"
+                                    >
+                                        View details
+                                    </a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <section class="driver-orders-empty" aria-live="polite">
+                <h2>No purchases yet</h2>
+                <p>Your completed orders will appear here after you redeem a reward.</p>
+            </section>
+        {% endif %}
+
+        <div class="order-actions">
+            <a class="button-link" href="{{ url_for('driver_dashboard') }}">
+                Back to Dashboard
+            </a>
+            <form class="inline-form" method="POST" action="{{ url_for('driver_logout') }}">
+                <button type="submit">Sign Out</button>
+            </form>
+        </div>
+    </main>
+</body>
+</html>

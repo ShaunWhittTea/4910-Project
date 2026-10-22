@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Driver Applications</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Driver Applications</h1>
+
+    {% if applications %}
+
+        {% for application in applications %}
+
+            <h3>
+                {{ application.first_name }}
+                {{ application.last_name }}
+            </h3>
+
+            <p>
+                <strong>Email:</strong>
+                {{ application.email }}
+            </p>
+
+            <p>
+                <strong>Phone:</strong>
+                {{ application.phone or "Not provided" }}
+            </p>
+
+            <p>
+                <strong>Driver's License:</strong>
+                {{ application.reason.replace("Valid driver's license: ", "") }}
+            </p>
+
+            <p>
+                <strong>Application Status:</strong>
+                {{ application.application_status }}
+            </p>
+
+            <p>
+                <strong>Submitted:</strong>
+                {{ application.created_at }}
+            </p>
+
+            {% if application.application_status == "PENDING" %}
+
+                <form
+                    method="POST"
+                    action="{{ url_for('sponsor_approve_application', application_id=application.application_id) }}"
+                    style="display: inline;"
+                >
+                    <button type="submit">Approve</button>
+                </form>
+
+                <form
+                    method="POST"
+                    action="{{ url_for('sponsor_reject_application', application_id=application.application_id) }}"
+                    style="display: inline;"
+                >
+                    <button type="submit">Reject</button>
+                </form>
+
+            {% endif %}
+
+            <hr>
+
+        {% endfor %}
+
+    {% else %}
+
+        <p>There are currently no driver applications for your organization.</p>
+
+    {% endif %}
+
+    <a href="{{ url_for('sponsor_dashboard') }}">
+        <button type="button">Back to Dashboard</button>
+    </a>
+
+</div>
+
+</body>
+</html>

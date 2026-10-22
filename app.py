@@ -2,7 +2,7 @@ import os
 import click
 
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, session, redirect, url_for
+from flask import Flask, flash, render_template, request, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import URL, text
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -265,10 +265,38 @@ def login():
         )
 
         if credentials_are_valid and user["status"] != "ACTIVE":
+
             if user["role"] == "DRIVER":
+                # Check whether this driver has submitted an application.
+                application = db.session.execute(
+                    text(
+                        """
+                        SELECT status
+                        FROM driver_application
+                        WHERE driver_user_id = :user_id
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "user_id": user["user_id"]
+                    },
+                ).mappings().first()
+
+                if application is not None and application["status"] in ("PENDING", "REJECTED"):
+                    session["user_id"] = user["user_id"]
+                    session["role"] = user["role"]
+
+                    if user["sponsor_org_id"] is not None:
+                        session["sponsor_org_id"] = user["sponsor_org_id"]
+
+                    return redirect(url_for("application_status"))
+
                 message = ACCOUNT_UNAVAILABLE_MESSAGE
+
             else:
                 message = "Invalid email or password."
+
         elif credentials_are_valid:
             session["user_id"] = user["user_id"]
             session["role"] = user["role"]
@@ -1251,6 +1279,436 @@ def sponsor_create_driver():
         message=message
     )
 
+# 25139 - Sponsor Create Another Sponsor User
+@app.route("/sponsor/users/create", methods=["GET", "POST"])
+@sponsor_required
+def sponsor_create_user():
+    message = None
+
+    if request.method == "POST":
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        phone = request.form.get("phone", "").strip()
+        password = request.form.get("password", "")
+
+        if not first_name or not last_name or not email or not password:
+            message = "First name, last name, email, and password are required."
+
+        elif len(password) < 8:
+            message = "Password must be at least 8 characters."
+
+        else:
+            try:
+                existing_user = db.session.execute(
+                    text(
+                        """
+                        SELECT user_id
+                        FROM app_user
+                        WHERE email = :email
+                        """
+                    ),
+                    {"email": email},
+                ).first()
+
+                if existing_user is not None:
+                    message = "A user with that email already exists."
+
+                else:
+                    db.session.execute(
+                        text(
+                            """
+                            INSERT INTO app_user
+                                (role,
+                                 email,
+                                 password_hash,
+                                 first_name,
+                                 last_name,
+                                 phone,
+                                 status,
+                                 sponsor_org_id)
+                            VALUES
+                                ('SPONSOR',
+                                 :email,
+                                 :password_hash,
+                                 :first_name,
+                                 :last_name,
+                                 :phone,
+                                 'ACTIVE',
+                                 :sponsor_org_id)
+                            """
+                        ),
+                        {
+                            "email": email,
+                            "password_hash": generate_password_hash(password),
+                            "first_name": first_name,
+                            "last_name": last_name,
+                            "phone": phone if phone else None,
+                            "sponsor_org_id": session["sponsor_org_id"],
+                        },
+                    )
+
+                    db.session.commit()
+                    message = "Sponsor user created successfully."
+
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Sponsor user creation failed")
+                message = "Unable to create sponsor user. Please try again."
+
+    return render_template(
+        "sponsor_create_user.html",
+        message=message
+    )
+
+# Driver Application
+@app.route("/apply", methods=["GET", "POST"])
+def driver_apply():
+    message = None
+
+    organizations = db.session.execute(
+        text(
+            """
+            SELECT sponsor_org_id, name
+            FROM sponsor_org
+            WHERE status = 'ACTIVE'
+            ORDER BY name
+            """
+        )
+    ).mappings().all()
+
+    if request.method == "POST":
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        phone = request.form.get("phone", "").strip()
+        has_license = request.form.get("has_license", "")
+        sponsor_org_id = request.form.get("sponsor_org_id", "")
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        if (
+            not first_name
+            or not last_name
+            or not email
+            or not phone
+            or not has_license
+            or not sponsor_org_id
+            or not password
+            or not confirm_password
+        ):
+            message = "Please complete all fields."
+
+        elif password != confirm_password:
+            message = "Passwords do not match."
+
+        elif len(password) < 8:
+            message = "Password must be at least 8 characters."
+
+        else:
+            try:
+                existing_user = db.session.execute(
+                    text(
+                        """
+                        SELECT user_id
+                        FROM app_user
+                        WHERE email = :email
+                        """
+                    ),
+                    {"email": email},
+                ).first()
+
+                if existing_user is not None:
+                    message = "An account with that email already exists."
+
+                else:
+                    # Create the applicant's pending driver account.
+                    result = db.session.execute(
+                        text(
+                            """
+                            INSERT INTO app_user
+                                (role,
+                                 email,
+                                 password_hash,
+                                 first_name,
+                                 last_name,
+                                 phone,
+                                 status,
+                                 sponsor_org_id)
+                            VALUES
+                                ('DRIVER',
+                                 :email,
+                                 :password_hash,
+                                 :first_name,
+                                 :last_name,
+                                 :phone,
+                                 'PENDING',
+                                 :sponsor_org_id)
+                            """
+                        ),
+                        {
+                            "email": email,
+                            "password_hash": generate_password_hash(password),
+                            "first_name": first_name,
+                            "last_name": last_name,
+                            "phone": phone,
+                            "sponsor_org_id": sponsor_org_id,
+                        },
+                    )
+
+                    driver_user_id = result.lastrowid
+
+                    # Create the pending application.
+                    db.session.execute(
+                        text(
+                            """
+                            INSERT INTO driver_application
+                                (driver_user_id,
+                                 sponsor_org_id,
+                                 status,
+                                 reason)
+                            VALUES
+                                (:driver_user_id,
+                                 :sponsor_org_id,
+                                 'PENDING',
+                                 :reason)
+                            """
+                        ),
+                        {
+                            "driver_user_id": driver_user_id,
+                            "sponsor_org_id": sponsor_org_id,
+                            "reason": (
+                                "Valid driver's license: "
+                                + has_license
+                            ),
+                        },
+                    )
+
+                    db.session.commit()
+
+                    message = (
+                        "Application submitted successfully. "
+                        "You can now use your login information "
+                        "to check your application status."
+                    )
+
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Driver application submission failed")
+                message = "Unable to submit application. Please try again."
+
+    return render_template(
+        "driver_apply.html",
+        organizations=organizations,
+        message=message
+    )
+
+@app.route("/application/status")
+def application_status():
+
+    if "user_id" not in session:
+        return redirect(url_for("login"))
+
+    application = db.session.execute(
+        text(
+            """
+            SELECT a.status,
+                   o.name AS organization_name
+            FROM driver_application a
+            JOIN sponsor_org o
+              ON a.sponsor_org_id = o.sponsor_org_id
+            WHERE a.driver_user_id = :user_id
+            ORDER BY a.created_at DESC
+            LIMIT 1
+            """
+        ),
+        {
+            "user_id": session["user_id"]
+        },
+    ).mappings().first()
+
+    if application is None:
+        return redirect(url_for("login"))
+
+    # Approved drivers should use the normal driver dashboard.
+    if application["status"] == "APPROVED":
+        return redirect(url_for("driver_dashboard"))
+
+    return render_template(
+        "application_status.html",
+        application=application
+    )
+
+# 25141 / 25142 - Sponsor Driver Application Management
+@app.route("/sponsor/applications")
+@sponsor_required
+def sponsor_applications():
+
+    applications = db.session.execute(
+        text(
+            """
+            SELECT a.application_id,
+                   a.status AS application_status,
+                   a.reason,
+                   a.created_at,
+                   u.first_name,
+                   u.last_name,
+                   u.email,
+                   u.phone
+            FROM driver_application a
+            JOIN app_user u
+              ON a.driver_user_id = u.user_id
+            WHERE a.sponsor_org_id = :sponsor_org_id
+            ORDER BY a.created_at DESC
+            """
+        ),
+        {
+            "sponsor_org_id": session["sponsor_org_id"]
+        },
+    ).mappings().all()
+
+    return render_template(
+        "sponsor_applications.html",
+        applications=applications
+    )
+
+# 25141 - Approve Driver Application
+@app.post("/sponsor/applications/<int:application_id>/approve")
+@sponsor_required
+def sponsor_approve_application(application_id):
+
+    application = db.session.execute(
+        text(
+            """
+            SELECT application_id, driver_user_id
+            FROM driver_application
+            WHERE application_id = :application_id
+              AND sponsor_org_id = :sponsor_org_id
+              AND status = 'PENDING'
+            """
+        ),
+        {
+            "application_id": application_id,
+            "sponsor_org_id": session["sponsor_org_id"],
+        },
+    ).mappings().first()
+
+    if application is None:
+        return "Application not found.", 404
+
+    try:
+        # Approve the application.
+        db.session.execute(
+            text(
+                """
+                UPDATE driver_application
+                SET status = 'APPROVED',
+                    decided_by = :decided_by,
+                    decided_at = CURRENT_TIMESTAMP
+                WHERE application_id = :application_id
+                """
+            ),
+            {
+                "decided_by": session["user_id"],
+                "application_id": application_id,
+            },
+        )
+
+        # Create the driver's profile so they can use normal driver features.
+        db.session.execute(
+            text(
+                """
+                INSERT INTO driver_profile
+                    (user_id,
+                     sponsor_org_id,
+                     point_balance)
+                VALUES
+                    (:driver_user_id,
+                     :sponsor_org_id,
+                     0)
+                """
+            ),
+            {
+                "driver_user_id": application["driver_user_id"],
+                "sponsor_org_id": session["sponsor_org_id"],
+            },
+        )
+
+        # Activate the driver's account.
+        db.session.execute(
+            text(
+                """
+                UPDATE app_user
+                SET status = 'ACTIVE'
+                WHERE user_id = :driver_user_id
+                  AND role = 'DRIVER'
+                """
+            ),
+            {
+                "driver_user_id": application["driver_user_id"]
+            },
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver application approval failed")
+        return "Unable to approve application.", 500
+
+    return redirect(url_for("sponsor_applications"))
+
+
+# 25142 - Reject Driver Application
+@app.post("/sponsor/applications/<int:application_id>/reject")
+@sponsor_required
+def sponsor_reject_application(application_id):
+
+    application = db.session.execute(
+        text(
+            """
+            SELECT application_id, driver_user_id
+            FROM driver_application
+            WHERE application_id = :application_id
+              AND sponsor_org_id = :sponsor_org_id
+              AND status = 'PENDING'
+            """
+        ),
+        {
+            "application_id": application_id,
+            "sponsor_org_id": session["sponsor_org_id"],
+        },
+    ).mappings().first()
+
+    if application is None:
+        return "Application not found.", 404
+
+    try:
+        db.session.execute(
+            text(
+                """
+                UPDATE driver_application
+                SET status = 'REJECTED',
+                    decided_by = :decided_by,
+                    decided_at = CURRENT_TIMESTAMP
+                WHERE application_id = :application_id
+                """
+            ),
+            {
+                "decided_by": session["user_id"],
+                "application_id": application_id,
+            },
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver application rejection failed")
+        return "Unable to reject application.", 500
+
+    return redirect(url_for("sponsor_applications"))
+
 # 25158 - Sponsor Management and Points - Driver Data
 @app.get("/sponsor/drivers")
 @sponsor_required
@@ -1284,6 +1742,103 @@ def sponsor_drivers():
         drivers=drivers
     )
 
+# 25143 - Sponsor Edit Driver Information
+@app.route("/sponsor/drivers/<int:driver_user_id>/edit", methods=["GET", "POST"])
+@sponsor_required
+def sponsor_edit_driver(driver_user_id):
+    message = None
+
+    # Make sure the driver belongs to the logged-in sponsor.
+    driver = db.session.execute(
+        text(
+            """
+            SELECT u.user_id,
+                   u.first_name,
+                   u.last_name,
+                   u.email,
+                   u.phone,
+                   d.shipping_address
+            FROM app_user u
+            JOIN driver_profile d
+              ON u.user_id = d.user_id
+            WHERE u.user_id = :driver_user_id
+              AND d.sponsor_org_id = :sponsor_org_id
+              AND u.role = 'DRIVER'
+            """
+        ),
+        {
+            "driver_user_id": driver_user_id,
+            "sponsor_org_id": session["sponsor_org_id"],
+        },
+    ).mappings().first()
+
+    if driver is None:
+        return "Driver not found.", 404
+
+    if request.method == "POST":
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        phone = request.form.get("phone", "").strip()
+        shipping_address = request.form.get("shipping_address", "").strip()
+
+        if not first_name or not last_name or not email:
+            message = "First name, last name, and email are required."
+        else:
+            try:
+                db.session.execute(
+                    text(
+                        """
+                        UPDATE app_user
+                        SET first_name = :first_name,
+                            last_name = :last_name,
+                            email = :email,
+                            phone = :phone
+                        WHERE user_id = :driver_user_id
+                          AND role = 'DRIVER'
+                        """
+                    ),
+                    {
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "email": email,
+                        "phone": phone if phone else None,
+                        "driver_user_id": driver_user_id,
+                    },
+                )
+
+                db.session.execute(
+                    text(
+                        """
+                        UPDATE driver_profile
+                        SET shipping_address = :shipping_address
+                        WHERE user_id = :driver_user_id
+                          AND sponsor_org_id = :sponsor_org_id
+                        """
+                    ),
+                    {
+                        "shipping_address": (
+                            shipping_address if shipping_address else None
+                        ),
+                        "driver_user_id": driver_user_id,
+                        "sponsor_org_id": session["sponsor_org_id"],
+                    },
+                )
+
+                db.session.commit()
+
+                return redirect(url_for("sponsor_drivers"))
+
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Sponsor driver update failed")
+                message = "Unable to update driver. Please try again."
+
+    return render_template(
+        "sponsor_edit_driver.html",
+        driver=driver,
+        message=message
+    )
 
 # 25171 - Sponsor Management and Points - Point Management
 @app.route("/sponsor/points", methods=["GET", "POST"])
@@ -1639,6 +2194,213 @@ def driver_point_history():
     )
 
 
+# 23886, 23887, 23888, 23890 & 23892 - Driver purchase self-service
+
+@app.get("/driver/orders")
+@driver_required
+def driver_orders():
+    """Show the authenticated driver's complete purchase history."""
+
+    try:
+        orders = db.session.execute(
+            text(
+                """
+                SELECT po.order_id,
+                       po.status,
+                       po.total_points,
+                       po.total_usd,
+                       po.created_at,
+                       s.name AS sponsor_name
+                FROM purchase_order AS po
+                JOIN sponsor_org AS s
+                  ON s.sponsor_org_id = po.sponsor_org_id
+                WHERE po.driver_user_id = :driver_user_id
+                ORDER BY po.created_at DESC, po.order_id DESC
+                """
+            ),
+            {"driver_user_id": session["user_id"]},
+        ).mappings().all()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver purchase history database error")
+        return "Unable to load purchase history right now.", 500
+
+    return render_template(
+        "driver_orders.html",
+        orders=orders,
+    )
+
+
+@app.get("/driver/orders/<int:order_id>")
+@driver_required
+def driver_order_detail(order_id):
+    """Show one purchase and its line items when it belongs to the driver."""
+
+    parameters = {
+        "order_id": order_id,
+        "driver_user_id": session["user_id"],
+    }
+
+    try:
+        order = db.session.execute(
+            text(
+                """
+                SELECT po.order_id,
+                       po.status,
+                       po.total_points,
+                       po.total_usd,
+                       po.created_at,
+                       s.name AS sponsor_name
+                FROM purchase_order AS po
+                JOIN sponsor_org AS s
+                  ON s.sponsor_org_id = po.sponsor_org_id
+                WHERE po.order_id = :order_id
+                  AND po.driver_user_id = :driver_user_id
+                """
+            ),
+            parameters,
+        ).mappings().first()
+
+        if order is None:
+            return "Order not found.", 404
+
+        order_lines = db.session.execute(
+            text(
+                """
+                SELECT ol.order_line_id,
+                       ol.external_product_id,
+                       ol.title,
+                       ol.quantity,
+                       ol.unit_price_usd,
+                       ol.unit_points
+                FROM order_line AS ol
+                JOIN purchase_order AS po
+                  ON po.order_id = ol.order_id
+                WHERE ol.order_id = :order_id
+                  AND po.driver_user_id = :driver_user_id
+                ORDER BY ol.order_line_id ASC
+                """
+            ),
+            parameters,
+        ).mappings().all()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver purchase detail database error")
+        return "Unable to load purchase details right now.", 500
+
+    return render_template(
+        "driver_order_detail.html",
+        order=order,
+        order_lines=order_lines,
+    )
+
+
+@app.post("/driver/orders/<int:order_id>/cancel")
+@driver_required
+def driver_cancel_order(order_id):
+    """Cancel an owned order only while it is still in PLACED status."""
+
+    parameters = {
+        "order_id": order_id,
+        "driver_user_id": session["user_id"],
+    }
+
+    try:
+        order = db.session.execute(
+            text(
+                """
+                SELECT order_id, status, total_points, sponsor_org_id
+                FROM purchase_order
+                WHERE order_id = :order_id
+                  AND driver_user_id = :driver_user_id
+                FOR UPDATE
+                """
+            ),
+            parameters,
+        ).mappings().first()
+
+        if order is None:
+            db.session.rollback()
+            return "Order not found.", 404
+
+        if order["status"] != "PLACED":
+            db.session.rollback()
+            flash(
+                "This order can no longer be canceled because it is not in "
+                "Placed status.",
+                "error",
+            )
+            return redirect(
+                url_for("driver_order_detail", order_id=order_id)
+            )
+
+        update_result = db.session.execute(
+            text(
+                """
+                UPDATE purchase_order
+                SET status = 'CANCELLED'
+                WHERE order_id = :order_id
+                  AND driver_user_id = :driver_user_id
+                  AND status = 'PLACED'
+                """
+            ),
+            parameters,
+        )
+
+        if update_result.rowcount != 1:
+            db.session.rollback()
+            flash(
+                "The order could not be canceled because its status changed. "
+                "Please review the current order status.",
+                "error",
+            )
+            return redirect(
+                url_for("driver_order_detail", order_id=order_id)
+            )
+
+        refund_parameters = {
+            **parameters,
+            "points": order["total_points"],
+            "sponsor_org_id": order["sponsor_org_id"],
+            "reason": f"Refund for canceled order #{order_id}",
+        }
+        refund_result = db.session.execute(
+            text(
+                """
+                UPDATE driver_profile
+                SET point_balance = point_balance + :points
+                WHERE user_id = :driver_user_id
+                """
+            ),
+            refund_parameters,
+        )
+        if refund_result.rowcount != 1:
+            raise RuntimeError("Driver balance was not updated")
+
+        db.session.execute(
+            text(
+                """
+                INSERT INTO point_change
+                    (driver_user_id, sponsor_org_id, actor_user_id,
+                     points, reason)
+                VALUES
+                    (:driver_user_id, :sponsor_org_id, :driver_user_id,
+                     :points, :reason)
+                """
+            ),
+            refund_parameters,
+        )
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver order cancellation failed")
+        return "Unable to cancel this order right now.", 500
+
+    flash(f"Order #{order_id} was canceled successfully.", "success")
+    return redirect(url_for("driver_order_detail", order_id=order_id))
+
+
 # 22367 & 22368 - View and update the authenticated driver's profile
 
 @app.route("/driver/profile", methods=["GET", "POST"])
@@ -1898,6 +2660,152 @@ def driver_catalog():
         total_items=total_items,
         total_pages=total_pages,
     )
+
+
+@app.post("/driver/catalog/<int:catalog_item_id>/purchase")
+@driver_required
+def driver_purchase_catalog_item(catalog_item_id):
+    """Purchase one active item from the authenticated driver's catalog."""
+
+    lookup_parameters = {
+        "catalog_item_id": catalog_item_id,
+        "driver_user_id": session["user_id"],
+    }
+
+    try:
+        item = db.session.execute(
+            text(
+                """
+                SELECT ci.catalog_item_id,
+                       ci.external_product_id,
+                       ci.title,
+                       ci.price_usd,
+                       dp.sponsor_org_id,
+                       dp.point_balance,
+                       CEILING(
+                           ci.price_usd / so.point_dollar_value
+                       ) AS points_price
+                FROM driver_profile AS dp
+                JOIN sponsor_org AS so
+                  ON so.sponsor_org_id = dp.sponsor_org_id
+                JOIN catalog_item AS ci
+                  ON ci.sponsor_org_id = dp.sponsor_org_id
+                WHERE dp.user_id = :driver_user_id
+                  AND ci.catalog_item_id = :catalog_item_id
+                  AND so.status = 'ACTIVE'
+                  AND ci.active = 1
+                FOR UPDATE
+                """
+            ),
+            lookup_parameters,
+        ).mappings().first()
+
+        if item is None:
+            db.session.rollback()
+            return "Catalog item not found.", 404
+
+        points_price = int(item["points_price"])
+        if item["point_balance"] < points_price:
+            db.session.rollback()
+            flash(
+                f"You need {points_price} points to purchase "
+                f"{item['title']}, but your balance is "
+                f"{item['point_balance']} points.",
+                "error",
+            )
+            return redirect(url_for("driver_catalog"))
+
+        purchase_parameters = {
+            "driver_user_id": session["user_id"],
+            "sponsor_org_id": item["sponsor_org_id"],
+            "catalog_item_id": item["catalog_item_id"],
+            "external_product_id": item["external_product_id"],
+            "title": item["title"],
+            "price_usd": item["price_usd"],
+            "points_price": points_price,
+            "reason": f"Catalog purchase: {item['title']}",
+        }
+
+        balance_result = db.session.execute(
+            text(
+                """
+                UPDATE driver_profile
+                SET point_balance = point_balance - :points_price
+                WHERE user_id = :driver_user_id
+                  AND sponsor_org_id = :sponsor_org_id
+                  AND point_balance >= :points_price
+                """
+            ),
+            purchase_parameters,
+        )
+        if balance_result.rowcount != 1:
+            db.session.rollback()
+            flash(
+                "Your point balance changed before the purchase completed. "
+                "Please review your balance and try again.",
+                "error",
+            )
+            return redirect(url_for("driver_catalog"))
+
+        order_result = db.session.execute(
+            text(
+                """
+                INSERT INTO purchase_order
+                    (driver_user_id, sponsor_org_id, placed_by_user_id,
+                     status, total_points, total_usd)
+                VALUES
+                    (:driver_user_id, :sponsor_org_id, :driver_user_id,
+                     'PLACED', :points_price, :price_usd)
+                """
+            ),
+            purchase_parameters,
+        )
+        order_id = order_result.lastrowid
+        if order_id is None:
+            raise RuntimeError("Purchase order ID was not returned")
+
+        line_parameters = {
+            **purchase_parameters,
+            "order_id": order_id,
+        }
+        db.session.execute(
+            text(
+                """
+                INSERT INTO order_line
+                    (order_id, external_product_id, title, quantity,
+                     unit_price_usd, unit_points)
+                VALUES
+                    (:order_id, :external_product_id, :title, 1,
+                     :price_usd, :points_price)
+                """
+            ),
+            line_parameters,
+        )
+        db.session.execute(
+            text(
+                """
+                INSERT INTO point_change
+                    (driver_user_id, sponsor_org_id, actor_user_id,
+                     points, reason)
+                VALUES
+                    (:driver_user_id, :sponsor_org_id, :driver_user_id,
+                     -:points_price, :reason)
+                """
+            ),
+            purchase_parameters,
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver catalog purchase failed")
+        return "Unable to complete this purchase right now.", 500
+
+    flash(
+        f"{item['title']} was purchased successfully for "
+        f"{points_price} points.",
+        "success",
+    )
+    return redirect(url_for("driver_order_detail", order_id=order_id))
 
 
 @app.get("/api/catalog/items")

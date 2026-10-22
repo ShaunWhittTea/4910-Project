@@ -18,6 +18,17 @@
             ← Back to dashboard
         </a>
 
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div
+                    class="order-message{% if category == 'error' %} order-message-error{% endif %}"
+                    role="status"
+                >
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endwith %}
+
         <header class="catalog-header">
             <div>
                 <h1>My Sponsor Catalog</h1>
@@ -64,6 +75,20 @@
                             <p class="catalog-price">
                                 ${{ "%.2f"|format(item.price_usd) }}
                             </p>
+
+                            <form
+                                class="catalog-purchase-form"
+                                method="POST"
+                                action="{{ url_for('driver_purchase_catalog_item', catalog_item_id=item.catalog_item_id) }}"
+                                onsubmit="return confirm('Purchase this item for {{ item.points_price }} points?');"
+                            >
+                                <button
+                                    class="catalog-purchase-button"
+                                    type="submit"
+                                >
+                                    Purchase Item
+                                </button>
+                            </form>
                         </div>
                     </article>
                 {% endfor %}

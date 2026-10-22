@@ -62,7 +62,7 @@ class SponsorProductSearchTests(unittest.TestCase):
         response = self.client.get("/sponsor/products/search?q=thermos")
 
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response.location.endswith("/sponsor/login"))
+        self.assertEqual(response.location, "/login")
         self.execute.assert_not_called()
         self.get_provider.assert_not_called()
 
