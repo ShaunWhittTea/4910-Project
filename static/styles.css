@@ -751,7 +751,42 @@ body {
     line-height: 1.5;
 }
 
-/* DRIVER PURCHASE HISTORY AND DETAILS */
+.user-index-container {
+    max-width: 1000px;
+}
+
+#userSearch {
+    width: 100%;
+    padding: 12px;
+    margin: 20px 0;
+    box-sizing: border-box;
+}
+
+.user-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.user-tab {
+    flex: 1;
+    padding: 12px;
+    background: #e5e7eb;
+    color: #0b2d55;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.user-tab.active {
+    background: #0b2d55;
+    color: white;
+}
+
+.user-table {
+    width: 100%;
+    border-collapse: collapse;
+}
 
 .driver-orders-page {
     width: min(1100px, calc(100% - 2rem));
@@ -790,6 +825,33 @@ body {
     border-collapse: collapse;
 }
 
+.user-table th,
+.user-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.user-table th {
+    background: #f1f3f5;
+    color: #0b2d55;
+}
+
+.user-table tr:hover {
+    background: #f8f9fa;
+}
+
+#noResults {
+    text-align: center;
+    padding: 20px;
+}
+.admin-page{
+    background-image: url("truckdigital.avif");
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+}
 .driver-orders-table th,
 .driver-orders-table td,
 .order-lines-table th,

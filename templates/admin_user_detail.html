@@ -1,0 +1,116 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>User Details</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body class="admin-page">
+
+<main class="container">
+
+    <h1>
+        {{ user['first_name'] }} {{ user['last_name'] }}
+    </h1>
+
+    <p>{{ user['role'] }} Account</p>
+
+    <dl class="profile-summary">
+
+        <div>
+            <dt>First Name</dt>
+            <dd>{{ user['first_name'] }}</dd>
+        </div>
+
+        <div>
+            <dt>Last Name</dt>
+            <dd>{{ user['last_name'] }}</dd>
+        </div>
+
+        <div>
+            <dt>Email</dt>
+            <dd>{{ user['email'] }}</dd>
+        </div>
+
+        <div>
+            <dt>Phone</dt>
+            <dd>{{ user['phone'] or 'Not provided' }}</dd>
+        </div>
+
+        {% if user['role'] == 'DRIVER' %}
+
+            <div>
+                <dt>Status</dt>
+                <dd>{{ user['status'] }}</dd>
+            </div>
+
+            <div>
+                <dt>Sponsor Organization</dt>
+                <dd>
+                    {% if user['sponsor_org_id'] %}
+                        <a href="{{ url_for('admin_organization_detail',
+                                           sponsor_org_id=user['sponsor_org_id']) }}">
+                            {{ user['organization_name'] }}
+                        </a>
+                    {% else %}
+                        Not assigned
+                    {% endif %}
+                </dd>
+            </div>
+
+            <div>
+                <dt>Current Point Balance</dt>
+                <dd>{{ user['point_balance'] if user['point_balance'] is not none else 'N/A' }}</dd>
+            </div>
+
+            <div>
+                <dt>Shipping Address</dt>
+                <dd>{{ user['shipping_address'] or 'Not provided' }}</dd>
+            </div>
+
+            <div>
+                <dt>Account Created</dt>
+                <dd>{{ user['created_at'].strftime('%B %d, %Y') }}</dd>
+            </div>
+
+        {% elif user['role'] == 'SPONSOR' %}
+
+            <div>
+                <dt>Status</dt>
+                <dd>{{ user['status'] }}</dd>
+            </div>
+
+            <div>
+                <dt>Sponsor Organization</dt>
+                <dd>
+                    {% if user['sponsor_org_id'] %}
+                        <a href="{{ url_for('admin_organization_detail',
+                                           sponsor_org_id=user['sponsor_org_id']) }}">
+                            {{ user['organization_name'] }}
+                        </a>
+                    {% else %}
+                        Not assigned
+                    {% endif %}
+                </dd>
+            </div>
+
+        {% endif %}
+
+    </dl>
+
+    <div class="actions">
+        <a class="button-link" href="{{ url_for('admin_user_index') }}">
+            Back to User Index
+        </a>
+    </div>
+
+</main>
+
+</body>
+</html>

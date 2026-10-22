@@ -1,0 +1,65 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sponsor Organization Details</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body class="admin-page">
+
+<main class="container">
+
+    <h1>{{ organization['name'] }}</h1>
+
+    <p>Sponsor Organization Details</p>
+
+    <dl class="profile-summary">
+
+        <div>
+            <dt>Organization Name</dt>
+            <dd>{{ organization['name'] }}</dd>
+        </div>
+
+        <div>
+            <dt>Contact Email</dt>
+            <dd>{{ organization['contact_email'] }}</dd>
+        </div>
+
+        <div>
+            <dt>Phone Number</dt>
+            <dd>{{ organization['phone'] or 'Not provided' }}</dd>
+        </div>
+
+        <div>
+            <dt>Created At</dt>
+            <dd>
+                {{ organization['created_at'].strftime('%B %d, %Y') }}
+            </dd>
+        </div>
+
+        <div>
+            <dt>Point Dollar Value</dt>
+            <dd>
+                ${{ "%.4f"|format(organization['point_dollar_value']) }}
+                per point
+            </dd>
+        </div>
+
+    </dl>
+
+    <div class="actions">
+        <a class="button-link" href="{{ url_for('admin_user_index') }}">
+            Back to User Index
+        </a>
+    </div>
+
+</main>
+
+</body>
+</html>

@@ -1,0 +1,158 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>User Index</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body class="admin-page">
+     <nav class="navbar">
+        <div class="brand">
+            <i class="fa-solid fa-car"></i>
+            <span class="brand-name">WIDE LOAD</span>
+        </div>
+
+        <div class="nav-links">
+            <a href="{{ url_for('admin_profile') }}" class="about-link">
+                Profile
+            </a>
+
+            <form
+                action="{{ url_for('logout') }}"
+                method="POST"
+                onsubmit="return confirm('Are you sure you want to log out?');"
+            >
+                <button type="submit" class="login-button">
+                    <i class="fa-solid fa-user"></i>
+                    <span>Logout</span>
+                </button>
+            </form>
+        </div>
+    </nav>
+
+<main class="container user-index-container">
+
+    <h1>User Index</h1>
+    <p>View and search all registered users.</p>
+
+    <input
+        type="search"
+        id="userSearch"
+        placeholder="Search by name or sponsor organization..."
+        oninput="filterUsers()"
+    >
+
+    <div class="user-tabs">
+        <button type="button" class="user-tab active"
+                onclick="showTab('ADMIN', this)">Admins</button>
+
+        <button type="button" class="user-tab"
+                onclick="showTab('SPONSOR', this)">Sponsors</button>
+
+        <button type="button" class="user-tab"
+                onclick="showTab('DRIVER', this)">Drivers</button>
+    </div>
+
+    <table class="user-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Sponsor Organization</th>
+            </tr>
+        </thead>
+
+        <tbody id="userTableBody">
+            {% for user in users %}
+            <tr class="user-row"
+                data-role="{{ user['role'] }}"
+                data-name="{{ (user['first_name'] ~ ' ' ~ user['last_name']) | lower }}"
+                data-organization="{{ (user['organization_name'] or '') | lower }}">
+
+<td>
+    <a href="{{ url_for('admin_user_detail', user_id=user['user_id']) }}">
+        {{ user['first_name'] }} {{ user['last_name'] }}
+    </a>
+</td>
+
+<td>{{ user['email'] }}</td>
+
+<td>
+    {% if user['sponsor_org_id'] %}
+        <a href="{{ url_for('admin_organization_detail',
+                           sponsor_org_id=user['sponsor_org_id']) }}">
+            {{ user['organization_name'] }}
+        </a>
+    {% else %}
+        —
+    {% endif %}
+</td>
+
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <p id="noResults" style="display: none;">
+        No users found.
+    </p>
+
+    <div class="actions">
+        <a class="button-link" href="{{ url_for('admin_home') }}">
+            Back to Admin Home
+        </a>
+    </div>
+
+</main>
+
+<script>
+    let activeRole = "ADMIN";
+
+    function showTab(role, button) {
+        activeRole = role;
+
+        document.querySelectorAll(".user-tab").forEach(tab => {
+            tab.classList.remove("active");
+        });
+
+        button.classList.add("active");
+        filterUsers();
+    }
+
+    function filterUsers() {
+        const search = document.getElementById("userSearch")
+            .value.trim().toLowerCase();
+
+        const rows = document.querySelectorAll(".user-row");
+        let visibleCount = 0;
+
+        rows.forEach(row => {
+            const role = row.dataset.role;
+            const name = row.dataset.name;
+            const organization = row.dataset.organization;
+
+            const matchesRole = role === activeRole;
+            const matchesSearch =
+                name.includes(search) || organization.includes(search);
+
+            const visible = matchesRole && matchesSearch;
+
+            row.style.display = visible ? "" : "none";
+
+            if (visible) visibleCount++;
+        });
+
+        document.getElementById("noResults").style.display =
+            visibleCount === 0 ? "block" : "none";
+    }
+
+    filterUsers();
+</script>
+
+</body>
+</html>
