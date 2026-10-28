@@ -1840,6 +1840,125 @@ def sponsor_edit_driver(driver_user_id):
         message=message
     )
 
+# 25161 - Sponsor Remove Driver From Organization
+@app.post("/sponsor/drivers/<int:driver_user_id>/remove")
+@sponsor_required
+def sponsor_remove_driver(driver_user_id):
+    sponsor_org_id = session["sponsor_org_id"]
+
+    # Make sure this driver belongs to the logged-in sponsor organization.
+    driver = db.session.execute(
+        text(
+            """
+            SELECT u.user_id
+            FROM app_user u
+            JOIN driver_profile d
+              ON d.user_id = u.user_id
+            WHERE u.user_id = :driver_user_id
+              AND d.sponsor_org_id = :sponsor_org_id
+              AND u.role = 'DRIVER'
+              AND u.status = 'ACTIVE'
+            """
+        ),
+        {
+            "driver_user_id": driver_user_id,
+            "sponsor_org_id": sponsor_org_id,
+        },
+    ).mappings().first()
+
+    if driver is None:
+        return "Driver not found.", 404
+
+    try:
+        # Keep the driver's records, but prevent further participation.
+        db.session.execute(
+            text(
+                """
+                UPDATE app_user
+                SET status = 'INACTIVE'
+                WHERE user_id = :driver_user_id
+                  AND role = 'DRIVER'
+                """
+            ),
+            {
+                "driver_user_id": driver_user_id
+            },
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Sponsor driver removal failed")
+        return "Unable to remove driver. Please try again.", 500
+
+    return redirect(url_for("sponsor_drivers"))
+
+# 25150 - Sponsor Assume Driver Identity
+@app.post("/sponsor/drivers/<int:driver_user_id>/impersonate")
+@sponsor_required
+def sponsor_impersonate_driver(driver_user_id):
+    sponsor_org_id = session["sponsor_org_id"]
+
+    # Make sure the driver belongs to this sponsor and is active.
+    driver = db.session.execute(
+        text(
+            """
+            SELECT u.user_id
+            FROM app_user u
+            JOIN driver_profile d
+              ON d.user_id = u.user_id
+            WHERE u.user_id = :driver_user_id
+              AND d.sponsor_org_id = :sponsor_org_id
+              AND u.role = 'DRIVER'
+              AND u.status = 'ACTIVE'
+            """
+        ),
+        {
+            "driver_user_id": driver_user_id,
+            "sponsor_org_id": sponsor_org_id,
+        },
+    ).mappings().first()
+
+    if driver is None:
+        return "Driver not found.", 404
+
+    # Save the sponsor's identity so we can switch back later.
+    session["original_sponsor_user_id"] = session["user_id"]
+    session["original_sponsor_org_id"] = session["sponsor_org_id"]
+    session["impersonating_driver"] = True
+
+    # Temporarily make the session act like the selected driver.
+    session["user_id"] = driver_user_id
+    session["role"] = "DRIVER"
+
+    return redirect(url_for("driver_dashboard"))
+
+# 25150 - Stop Driver Impersonation and Return to Sponsor
+@app.post("/sponsor/stop-impersonating")
+def sponsor_stop_impersonating():
+    if not session.get("impersonating_driver"):
+        return redirect(url_for("login"))
+
+    sponsor_user_id = session.get("original_sponsor_user_id")
+    sponsor_org_id = session.get("original_sponsor_org_id")
+
+    if not sponsor_user_id or not sponsor_org_id:
+        session.clear()
+        return redirect(url_for("login"))
+
+    # Restore the original sponsor session.
+    session["user_id"] = sponsor_user_id
+    session["sponsor_org_id"] = sponsor_org_id
+    session["role"] = "SPONSOR"
+
+    # Remove the temporary impersonation information.
+    session.pop("original_sponsor_user_id", None)
+    session.pop("original_sponsor_org_id", None)
+    session.pop("impersonating_driver", None)
+
+    return redirect(url_for("sponsor_dashboard"))
+
 # 25171 - Sponsor Management and Points - Point Management
 @app.route("/sponsor/points", methods=["GET", "POST"])
 @sponsor_required

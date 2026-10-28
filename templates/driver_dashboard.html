@@ -11,24 +11,39 @@
 <body>
 <main class="container">
     <h1>Driver Dashboard</h1>
-    <p>Welcome! You are successfully signed in.</p>
+
+    {% if session.get('impersonating_driver') %}
+        <p>You are currently viewing the site as this driver.</p>
+    {% else %}
+        <p>Welcome! You are successfully signed in.</p>
+    {% endif %}
 
     <div class="actions">
         <a class="button-link" href="{{ url_for('driver_profile') }}">
             My Profile
         </a>
+
         <a class="button-link" href="{{ url_for('driver_point_history') }}">
             My Point History
         </a>
+
         <a class="button-link" href="{{ url_for('driver_catalog') }}">
             Browse My Sponsor Catalog
         </a>
+
         <a class="button-link" href="{{ url_for('driver_orders') }}">
             My Purchases
         </a>
-        <form class="inline-form" method="POST" action="{{ url_for('driver_logout') }}">
-            <button type="submit">Sign Out</button>
-        </form>
+
+        {% if session.get('impersonating_driver') %}
+            <form class="inline-form" method="POST" action="{{ url_for('sponsor_stop_impersonating') }}">
+                <button type="submit">Return to Sponsor</button>
+            </form>
+        {% else %}
+            <form class="inline-form" method="POST" action="{{ url_for('driver_logout') }}">
+                <button type="submit">Sign Out</button>
+            </form>
+        {% endif %}
     </div>
 </main>
 </body>
