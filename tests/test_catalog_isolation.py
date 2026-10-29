@@ -41,6 +41,7 @@ CREATE TABLE catalog_item (
     external_product_id TEXT NOT NULL,
     title TEXT NOT NULL,
     description TEXT,
+    category TEXT,
     price_usd NUMERIC NOT NULL,
     image_url TEXT,
     active INTEGER NOT NULL
@@ -178,7 +179,123 @@ class CatalogIsolationTests(unittest.TestCase):
         response = self.client.get("/api/catalog/items")
 
         self.assertEqual(response.status_code, 403)
+    def test_keyword_category_sort_and_pagination_work_together(self):
+        self.database_session.execute(
+            text("""
+                UPDATE catalog_item
+                SET category = 'Equipment',
+                    description = 'Long haul reward'
+                WHERE catalog_item_id IN (1, 2, 4)
+            """)
+        )
 
+        with catalog_app.app.app_context():
+            first_page, total = catalog_app.get_driver_catalog_page(
+                driver_user_id=101,
+                page=1,
+                page_size=1,
+                query="LONG HAUL",
+                category="Equipment",
+                sort="points_desc",
+            )
+
+            second_page, second_total = (
+                catalog_app.get_driver_catalog_page(
+                    driver_user_id=101,
+                    page=2,
+                    page_size=1,
+                    query="LONG HAUL",
+                    category="Equipment",
+                    sort="points_desc",
+                )
+            )
+
+        self.assertEqual(total, 2)
+        self.assertEqual(second_total, 2)
+        self.assertEqual(first_page[0]["catalog_item_id"], 2)
+        self.assertEqual(second_page[0]["catalog_item_id"], 1)
+
+        returned_ids = [
+            item["catalog_item_id"]
+            for item in first_page + second_page
+        ]
+        self.assertNotIn(4, returned_ids)
+
+    def test_category_without_matches_returns_empty_page(self):
+        with catalog_app.app.app_context():
+            items, total = catalog_app.get_driver_catalog_page(
+                driver_user_id=101,
+                page=1,
+                page_size=12,
+                category="No Such Category",
+            )
+
+        self.assertEqual(items, [])
+        self.assertEqual(total, 0)
+
+    def test_keyword_wildcards_are_treated_literally(self):
+        self.database_session.execute(
+            text("""
+                UPDATE catalog_item
+                SET title = '100% Reward'
+                WHERE catalog_item_id = 1
+            """)
+        )
+
+        with catalog_app.app.app_context():
+            items, total = catalog_app.get_driver_catalog_page(
+                driver_user_id=101,
+                page=1,
+                page_size=12,
+                query="%",
+            )
+
+        self.assertEqual(total, 1)
+        self.assertEqual(items[0]["catalog_item_id"], 1)
+
+    def test_name_sort_uses_requested_direction(self):
+        self.database_session.execute(
+            text("""
+                UPDATE catalog_item
+                SET title = CASE catalog_item_id
+                    WHEN 1 THEN 'Zulu Reward'
+                    WHEN 2 THEN 'Alpha Reward'
+                    ELSE title
+                END
+            """)
+        )
+
+        with catalog_app.app.app_context():
+            items, total = catalog_app.get_driver_catalog_page(
+                driver_user_id=101,
+                page=1,
+                page_size=12,
+                sort="name_asc",
+            )
+
+        self.assertEqual(total, 2)
+        self.assertEqual(
+            [item["catalog_item_id"] for item in items],
+            [2, 1],
+        )
+
+    def test_invalid_catalog_options_are_rejected(self):
+        invalid_options = [
+            {"sort": "unexpected_sort"},
+            {"query": "x" * 101},
+            {"category": "x" * 121},
+        ]
+
+        with catalog_app.app.app_context():
+            for options in invalid_options:
+                with self.subTest(options=options):
+                    with self.assertRaises(ValueError):
+                        catalog_app.get_driver_catalog_page(
+                            driver_user_id=101,
+                            page=1,
+                            page_size=12,
+                            **options,
+                        )
 
 if __name__ == "__main__":
     unittest.main()

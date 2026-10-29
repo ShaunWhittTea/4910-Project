@@ -40,6 +40,70 @@
             </p>
         </header>
 
+        <form method="get" action="{{ url_for('driver_catalog') }}">
+    <div>
+        <label for="catalog-query">Keyword</label>
+        <input
+            id="catalog-query"
+            type="search"
+            name="q"
+            value="{{ query }}"
+            maxlength="100"
+            placeholder="Search titles and descriptions"
+        >
+    </div>
+
+    <div>
+        <label for="catalog-category">Category</label>
+        <select id="catalog-category" name="category">
+            <option value="">All categories</option>
+
+            {% if selected_category
+                  and selected_category not in categories %}
+                <option value="{{ selected_category }}" selected>
+                    {{ selected_category }} (no active matches)
+                </option>
+            {% endif %}
+
+            {% for category_name in categories %}
+                <option
+                    value="{{ category_name }}"
+                    {% if selected_category == category_name %}selected{% endif %}
+                >
+                    {{ category_name }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div>
+        <label for="catalog-sort">Sort</label>
+        <select id="catalog-sort" name="sort">
+            {% for value, label in [
+                ('default', 'Default order'),
+                ('name_asc', 'Name: A–Z'),
+                ('name_desc', 'Name: Z–A'),
+                ('points_asc', 'Points: low to high'),
+                ('points_desc', 'Points: high to low')
+            ] %}
+                <option
+                    value="{{ value }}"
+                    {% if selected_sort == value %}selected{% endif %}
+                >
+                    {{ label }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <input type="hidden" name="pageSize" value="{{ page_size }}">
+
+    <button type="submit">Apply</button>
+    <a href="{{ url_for('driver_catalog', pageSize=page_size) }}">
+        Clear filters
+    </a>
+</form>
+        
         {% if catalog_items %}
             <section class="catalog-grid" aria-label="Catalog products">
                 {% for item in catalog_items %}
@@ -101,7 +165,14 @@
                 {% if page > 1 %}
                     <a
                         class="page-button"
-                        href="{{ url_for('driver_catalog', page=page - 1, pageSize=page_size) }}"
+                        href="{{ url_for(
+                                'driver_catalog',
+                                page=page - 1,
+                                pageSize=page_size,
+                                q=query,
+                                category=selected_category,
+                                sort=selected_sort
+                            ) }}"
                     >
                         Previous
                     </a>
@@ -118,7 +189,14 @@
                 {% if page < total_pages %}
                     <a
                         class="page-button"
-                        href="{{ url_for('driver_catalog', page=page + 1, pageSize=page_size) }}"
+                        href="{{ url_for(
+                                    'driver_catalog',
+                                    page=page + 1,
+                                    pageSize=page_size,
+                                    q=query,
+                                    category=selected_category,
+                                    sort=selected_sort
+                            ) }}"
                     >
                         Next
                     </a>
