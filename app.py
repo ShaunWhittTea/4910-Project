@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 import click
 
@@ -5,6 +7,7 @@ from dotenv import load_dotenv
 from flask import Flask, flash, render_template, request, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import URL, text
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
 from product_api import (
@@ -30,6 +33,12 @@ app.config["EBAY_SANDBOX"] = os.getenv(
 # 23319 - Protect stored passwords / sessions
 app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["PASSWORD_RESET_MAX_AGE"] = int(
+    os.getenv("PASSWORD_RESET_MAX_AGE", "1800")
+)
+app.config["PASSWORD_RESET_SHOW_LINK"] = os.getenv(
+    "PASSWORD_RESET_SHOW_LINK", "false"
+).strip().lower() == "true"
 
 app.config["SQLALCHEMY_DATABASE_URI"] = URL.create(
     drivername="mysql+pymysql",
@@ -53,6 +62,15 @@ ACCOUNT_UNAVAILABLE_MESSAGE = (
     "Contact your sponsor administrator for help."
 )
 PASSWORD_MIN_LENGTH = 12
+PASSWORD_RESET_SALT = "driver-password-reset-v1"
+PASSWORD_RESET_REQUEST_MESSAGE = (
+    "If an active driver account matches that email, a password-reset "
+    "link has been prepared."
+)
+INVALID_RESET_LINK_MESSAGE = (
+    "This password-reset link is invalid, expired, or has already been "
+    "used. Request a new link to continue."
+)
 
 
 def get_password_validation_errors(password):
@@ -75,6 +93,88 @@ def get_password_validation_errors(password):
         errors.append("a special character")
 
     return errors
+
+
+def format_password_validation_errors(errors):
+    """Return clear feedback while keeping the policy in one place."""
+
+    return "Password must include " + ", ".join(errors) + "."
+
+
+def get_password_requirements():
+    """Return the password rules for driver-facing forms."""
+
+    return [
+        f"At least {PASSWORD_MIN_LENGTH} characters",
+        "At least one uppercase letter",
+        "At least one lowercase letter",
+        "At least one number",
+        "At least one special character",
+    ]
+
+
+def get_password_reset_serializer():
+    return URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt=PASSWORD_RESET_SALT,
+    )
+
+
+def get_password_hash_fingerprint(password_hash):
+    """Bind a reset token to the current password without exposing it."""
+
+    return hashlib.sha256(password_hash.encode("utf-8")).hexdigest()
+
+
+def create_password_reset_token(user_id, password_hash):
+    return get_password_reset_serializer().dumps(
+        {
+            "user_id": user_id,
+            "password_fingerprint": get_password_hash_fingerprint(
+                password_hash
+            ),
+        }
+    )
+
+
+def get_password_reset_payload(token):
+    """Return a verified reset payload, or None for invalid/expired data."""
+
+    try:
+        payload = get_password_reset_serializer().loads(
+            token,
+            max_age=app.config["PASSWORD_RESET_MAX_AGE"],
+        )
+    except (BadSignature, SignatureExpired):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    if not isinstance(payload.get("user_id"), int):
+        return None
+    if not isinstance(payload.get("password_fingerprint"), str):
+        return None
+
+    return payload
+
+
+def deliver_password_reset_link(user, reset_url):
+    """Deliver through an injected sender; local testing may show the URL."""
+
+    sender = app.extensions.get("password_reset_sender")
+    if sender is not None:
+        sender(
+            email=user["email"],
+            first_name=user["first_name"],
+            reset_url=reset_url,
+        )
+        return
+
+    app.logger.warning(
+        "Password reset requested for driver user_id=%s, but no "
+        "password_reset_sender is configured.",
+        user["user_id"],
+    )
 
 
 @app.get("/")
@@ -212,6 +312,8 @@ def login():
     if session.get("user_id") and session.get("role") == "ADMIN":
         return redirect(url_for("admin_home"))
     message = None
+    if request.args.get("password_reset") == "success":
+        message = "Your password was reset successfully. You can now sign in."
     email = ""
 
     if request.method == "POST":
@@ -315,6 +417,209 @@ def login():
         "driver_login.html",
         message=message,
         email=email,
+    )
+
+
+# 22359, 22360 & 22361 - Driver password-reset workflow
+
+@app.route("/driver/password/forgot", methods=["GET", "POST"])
+def driver_forgot_password():
+    message = None
+    email = ""
+    reset_link = None
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        if not email:
+            message = "Please enter your email address."
+        else:
+            try:
+                user = db.session.execute(
+                    text(
+                        """
+                        SELECT u.user_id, u.email, u.first_name,
+                               u.password_hash
+                        FROM app_user AS u
+                        JOIN driver_profile AS d
+                          ON d.user_id = u.user_id
+                        WHERE u.email = :email
+                          AND u.role = 'DRIVER'
+                          AND u.status = 'ACTIVE'
+                        """
+                    ),
+                    {"email": email},
+                ).mappings().first()
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Password-reset request database error")
+                return render_template(
+                    "driver_forgot_password.html",
+                    message=(
+                        "Unable to process the request right now. "
+                        "Please try again."
+                    ),
+                    email=email,
+                    reset_link=None,
+                ), 500
+
+            if user is not None and user["password_hash"]:
+                token = create_password_reset_token(
+                    user["user_id"],
+                    user["password_hash"],
+                )
+                generated_link = url_for(
+                    "driver_reset_password",
+                    token=token,
+                    _external=True,
+                )
+                try:
+                    deliver_password_reset_link(user, generated_link)
+                except Exception:
+                    app.logger.exception("Password-reset delivery failed")
+
+                if (
+                    app.config["PASSWORD_RESET_SHOW_LINK"]
+                    or app.config.get("TESTING")
+                ):
+                    reset_link = generated_link
+
+            # Always use the same public response so account membership is
+            # not disclosed to someone submitting arbitrary email addresses.
+            message = PASSWORD_RESET_REQUEST_MESSAGE
+
+    return render_template(
+        "driver_forgot_password.html",
+        message=message,
+        email=email,
+        reset_link=reset_link,
+    )
+
+
+@app.route("/driver/password/reset/<token>", methods=["GET", "POST"])
+def driver_reset_password(token):
+    payload = get_password_reset_payload(token)
+    if payload is None:
+        return render_template(
+            "driver_reset_password.html",
+            valid_link=False,
+            message=INVALID_RESET_LINK_MESSAGE,
+            password_requirements=get_password_requirements(),
+        )
+
+    try:
+        user = db.session.execute(
+            text(
+                """
+                SELECT u.user_id, u.password_hash
+                FROM app_user AS u
+                JOIN driver_profile AS d
+                  ON d.user_id = u.user_id
+                WHERE u.user_id = :user_id
+                  AND u.role = 'DRIVER'
+                  AND u.status = 'ACTIVE'
+                """
+            ),
+            {"user_id": payload["user_id"]},
+        ).mappings().first()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Password-reset validation database error")
+        return "Unable to validate this reset link right now.", 500
+
+    token_matches_current_password = (
+        user is not None
+        and user["password_hash"]
+        and hmac.compare_digest(
+            payload["password_fingerprint"],
+            get_password_hash_fingerprint(user["password_hash"]),
+        )
+    )
+    if not token_matches_current_password:
+        return render_template(
+            "driver_reset_password.html",
+            valid_link=False,
+            message=INVALID_RESET_LINK_MESSAGE,
+            password_requirements=get_password_requirements(),
+        )
+
+    message = None
+    password_errors = []
+    if request.method == "POST":
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        if not new_password or not confirm_password:
+            message = "Please enter and confirm your new password."
+        elif new_password != confirm_password:
+            message = "New passwords do not match."
+        else:
+            password_errors = get_password_validation_errors(new_password)
+            if password_errors:
+                message = format_password_validation_errors(password_errors)
+            elif check_password_hash(user["password_hash"], new_password):
+                message = "Choose a password different from your current password."
+            else:
+                new_password_hash = generate_password_hash(new_password)
+                try:
+                    update_result = db.session.execute(
+                        text(
+                            """
+                            UPDATE app_user
+                            SET password_hash = :new_password_hash
+                            WHERE user_id = :user_id
+                              AND role = 'DRIVER'
+                              AND password_hash = :current_password_hash
+                            """
+                        ),
+                        {
+                            "new_password_hash": new_password_hash,
+                            "user_id": user["user_id"],
+                            "current_password_hash": user["password_hash"],
+                        },
+                    )
+                    if update_result.rowcount != 1:
+                        db.session.rollback()
+                        return render_template(
+                            "driver_reset_password.html",
+                            valid_link=False,
+                            message=INVALID_RESET_LINK_MESSAGE,
+                            password_requirements=get_password_requirements(),
+                        )
+
+                    db.session.execute(
+                        text(
+                            """
+                            INSERT INTO audit_log
+                                (category, actor_user_id, target_user_id,
+                                 success, reason)
+                            VALUES
+                                ('PASSWORD_CHANGE', :user_id, :user_id,
+                                 TRUE, :reason)
+                            """
+                        ),
+                        {
+                            "user_id": user["user_id"],
+                            "reason": "Driver completed password reset",
+                        },
+                    )
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                    app.logger.exception("Driver password reset failed")
+                    message = (
+                        "Unable to reset your password right now. "
+                        "Please try again."
+                    )
+                else:
+                    session.clear()
+                    return redirect(url_for("login", password_reset="success"))
+
+    return render_template(
+        "driver_reset_password.html",
+        valid_link=True,
+        message=message,
+        password_errors=password_errors,
+        password_requirements=get_password_requirements(),
     )
 
 @app.route("/logout", methods=["GET", "POST"])
@@ -1402,8 +1707,10 @@ def driver_apply():
         elif password != confirm_password:
             message = "Passwords do not match."
 
-        elif len(password) < 8:
-            message = "Password must be at least 8 characters."
+        elif get_password_validation_errors(password):
+            message = format_password_validation_errors(
+                get_password_validation_errors(password)
+            )
 
         else:
             try:
@@ -1500,7 +1807,8 @@ def driver_apply():
     return render_template(
         "driver_apply.html",
         organizations=organizations,
-        message=message
+        message=message,
+        password_requirements=get_password_requirements(),
     )
 
 @app.route("/application/status")
@@ -2206,6 +2514,8 @@ def sponsor_communications():
 @app.route("/driver/login", methods=["GET", "POST"])
 def driver_login():
     message = None
+    if request.args.get("password_reset") == "success":
+        message = "Your password was reset successfully. You can now sign in."
     email = ""
 
     if request.method == "POST":
@@ -2277,6 +2587,113 @@ def driver_login():
 @driver_required
 def driver_dashboard():
     return render_template("driver_dashboard.html")
+
+
+# 22362 & 22363 - Change password and explain complexity requirements
+
+@app.route("/driver/password/change", methods=["GET", "POST"])
+@driver_required
+def driver_change_password():
+    message = None
+    password_errors = []
+
+    if request.method == "POST":
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        try:
+            user = db.session.execute(
+                text(
+                    """
+                    SELECT password_hash
+                    FROM app_user
+                    WHERE user_id = :user_id
+                      AND role = 'DRIVER'
+                    """
+                ),
+                {"user_id": session["user_id"]},
+            ).mappings().first()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("Driver password lookup failed")
+            return "Unable to change your password right now.", 500
+
+        if not current_password or not new_password or not confirm_password:
+            message = "Complete all password fields."
+        elif (
+            user is None
+            or not user["password_hash"]
+            or not check_password_hash(
+                user["password_hash"], current_password
+            )
+        ):
+            message = "Current password is incorrect."
+        elif new_password != confirm_password:
+            message = "New passwords do not match."
+        else:
+            password_errors = get_password_validation_errors(new_password)
+            if password_errors:
+                message = format_password_validation_errors(password_errors)
+            elif check_password_hash(user["password_hash"], new_password):
+                message = "Choose a password different from your current password."
+            else:
+                try:
+                    update_result = db.session.execute(
+                        text(
+                            """
+                            UPDATE app_user
+                            SET password_hash = :new_password_hash
+                            WHERE user_id = :user_id
+                              AND role = 'DRIVER'
+                              AND password_hash = :current_password_hash
+                            """
+                        ),
+                        {
+                            "new_password_hash": generate_password_hash(
+                                new_password
+                            ),
+                            "user_id": session["user_id"],
+                            "current_password_hash": user["password_hash"],
+                        },
+                    )
+                    if update_result.rowcount != 1:
+                        raise RuntimeError("Driver password was not updated")
+
+                    db.session.execute(
+                        text(
+                            """
+                            INSERT INTO audit_log
+                                (category, actor_user_id, target_user_id,
+                                 success, reason)
+                            VALUES
+                                ('PASSWORD_CHANGE', :user_id, :user_id,
+                                 TRUE, :reason)
+                            """
+                        ),
+                        {
+                            "user_id": session["user_id"],
+                            "reason": "Driver changed password",
+                        },
+                    )
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                    app.logger.exception("Driver password change failed")
+                    message = (
+                        "Unable to change your password right now. "
+                        "Please try again."
+                    )
+                else:
+                    flash("Password changed successfully.", "success")
+                    return redirect(url_for("driver_profile"))
+
+    return render_template(
+        "driver_change_password.html",
+        message=message,
+        password_errors=password_errors,
+        password_requirements=get_password_requirements(),
+    )
 
 
 # 22580, 23861, 23864, 23866 & 23868 - Driver point history

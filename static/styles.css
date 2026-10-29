@@ -201,6 +201,40 @@ button:hover {
     }
 }
 
+.form-help {
+    margin-top: 1rem;
+}
+
+.password-page {
+    max-width: 680px;
+}
+
+.password-requirements,
+.local-reset-link {
+    margin: 0.75rem 0 1rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid #d5d9df;
+    border-radius: 0.45rem;
+    background: #f8fafc;
+}
+
+.password-requirements ul {
+    margin: 0.5rem 0 0;
+    padding-left: 1.25rem;
+}
+
+.local-reset-link p:last-child {
+    margin-bottom: 0;
+    color: #4a5561;
+    font-size: 0.9rem;
+}
+
+.message-error {
+    border-color: #d6a4a4;
+    background: #fff1f1;
+    color: #8b1e1e;
+}
+
 
 /* -------------------------------------------------------------------------
    Driver Catalog
