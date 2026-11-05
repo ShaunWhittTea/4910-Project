@@ -2,7 +2,9 @@ import hashlib
 import hmac
 import os
 import click
-
+import json
+import secrets
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask, flash, render_template, request, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
@@ -56,6 +58,75 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
+
+@app.context_processor
+def csrf_context():
+    def csrf_token():
+        if "_csrf_token" not in session:
+            session["_csrf_token"] = secrets.token_hex(32)
+        return session["_csrf_token"]
+
+    return {"csrf_token": csrf_token}
+
+
+def valid_csrf_token():
+    expected = session.get("_csrf_token")
+    submitted = request.form.get("csrf_token", "")
+
+    return bool(expected) and secrets.compare_digest(
+        expected, submitted
+    )
+
+
+def write_audit_log(category, actor_user_id=None, target_user_id=None,
+                    sponsor_org_id=None, success=True, reason=None,
+                    detail=None, username_attempted=None):
+
+    db.session.execute(
+        text("""
+            INSERT INTO audit_log
+                (category, actor_user_id, target_user_id,
+                 sponsor_org_id, username_attempted,
+                 success, reason, detail)
+            VALUES
+                (:category, :actor_user_id, :target_user_id,
+                 :sponsor_org_id, :username_attempted,
+                 :success, :reason, :detail)
+        """),
+        {
+            "category": category,
+            "actor_user_id": actor_user_id,
+            "target_user_id": target_user_id,
+            "sponsor_org_id": sponsor_org_id,
+            "username_attempted": username_attempted,
+            "success": success,
+            "reason": reason,
+            "detail": json.dumps(detail) if detail is not None else None
+        }
+    )
+
+
+def audit_login(user=None, email="", success=False, reason=None):
+
+    try:
+        write_audit_log(
+            category="LOGIN_ATTEMPT",
+            actor_user_id=user["user_id"] if user else None,
+            sponsor_org_id=user["sponsor_org_id"] if user else None,
+            username_attempted=email,
+            success=success,
+            reason=reason,
+            detail={
+                "action": "LOGIN",
+                "role": user["role"] if user else None
+            }
+        )
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Unable to record login audit")
+        raise
 
 ACCOUNT_UNAVAILABLE_MESSAGE = (
     "Your driver account is not currently available. "
@@ -323,12 +394,12 @@ def login():
         password = request.form.get("password", "")
 
         if not email or not password:
-            message = "Please enter both an email and password."
-            return render_template(
-                "driver_login.html",
-                message=message,
+            audit_login(
                 email=email,
-            )
+                 success=False,
+                 reason="Missing login credentials"
+        )
+        message = "Please enter both an email and password."
 
         try:
             user = db.session.execute(
@@ -365,6 +436,22 @@ def login():
             and user["password_hash"] is not None
             and check_password_hash(user["password_hash"], password)
         )
+        
+        if not credentials_are_valid or user["status"] != "ACTIVE":
+            audit_login(
+                user=user,
+                email=email,
+                success=False,
+                reason="Invalid credentials or account unavailable"
+            )
+        else:
+            audit_login(
+                user=user,
+                email=email,
+                success=True,
+                reason="Successful login"
+            )
+
 
         if credentials_are_valid and user["status"] != "ACTIVE":
 
@@ -982,7 +1069,266 @@ def admin_user_detail(user_id):
         user=user
     )
 
+@app.post("/admin/users/<int:user_id>/points")
+def admin_adjust_driver_points(user_id):
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
 
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    if not valid_csrf_token():
+        return "Invalid form token.", 400
+
+    action = request.form.get("action", "")
+    reason = request.form.get("reason", "").strip()
+
+    try:
+        points = int(request.form.get("points", ""))
+    except ValueError:
+        return "Invalid point amount.", 400
+
+    if action not in ("add", "deduct") or points <= 0:
+        return "Invalid point adjustment.", 400
+
+    if not reason or len(reason) > 500:
+        return "A reason of 500 characters or fewer is required.", 400
+
+    try:
+        driver = db.session.execute(
+            text("""
+                SELECT dp.point_balance, dp.sponsor_org_id
+                FROM driver_profile AS dp
+                JOIN app_user AS u ON u.user_id = dp.user_id
+                WHERE dp.user_id = :user_id
+                  AND u.role = 'DRIVER'
+                FOR UPDATE
+            """),
+            {"user_id": user_id}
+        ).mappings().first()
+
+        if driver is None:
+            db.session.rollback()
+            return "Driver not found.", 404
+
+        old_balance = driver["point_balance"]
+        change = points if action == "add" else -points
+        new_balance = old_balance + change
+
+        if new_balance < 0:
+            db.session.rollback()
+            flash("Cannot deduct more points than the driver has.", "error")
+            return redirect(url_for("admin_user_detail", user_id=user_id))
+
+        db.session.execute(
+            text("""
+                UPDATE driver_profile
+                SET point_balance = :new_balance
+                WHERE user_id = :user_id
+            """),
+            {
+                "new_balance": new_balance,
+                "user_id": user_id
+            }
+        )
+
+        db.session.execute(
+            text("""
+                INSERT INTO point_change
+                    (driver_user_id, sponsor_org_id,
+                     actor_user_id, points, reason)
+                VALUES
+                    (:driver_user_id, :sponsor_org_id,
+                     :actor_user_id, :points, :reason)
+            """),
+            {
+                "driver_user_id": user_id,
+                "sponsor_org_id": driver["sponsor_org_id"],
+                "actor_user_id": session["user_id"],
+                "points": change,
+                "reason": reason
+            }
+        )
+
+        write_audit_log(
+            category="POINT_CHANGE",
+            actor_user_id=session["user_id"],
+            target_user_id=user_id,
+            sponsor_org_id=driver["sponsor_org_id"],
+            success=True,
+            reason=reason,
+            detail={
+                "action": "ADMIN_POINT_ADJUSTMENT",
+                "adjustment_type": action,
+                "points_changed": change,
+                "previous_balance": old_balance,
+                "new_balance": new_balance
+            }
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Admin point adjustment failed")
+        return "Unable to adjust driver points.", 500
+
+    flash("Driver points updated successfully.", "success")
+    return redirect(url_for("admin_user_detail", user_id=user_id))
+
+
+@app.post("/admin/users/<int:user_id>/reset-password")
+def admin_reset_user_password(user_id):
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    if not valid_csrf_token():
+        return "Invalid form token.", 400
+
+    new_password = request.form.get("new_password", "")
+    confirm_password = request.form.get("confirm_password", "")
+
+    if len(new_password) < 12:
+        flash("Password must be at least 12 characters.", "error")
+        return redirect(url_for("admin_user_detail", user_id=user_id))
+
+    if len(new_password) > 1024:
+        return "Password is too long.", 400
+
+    if new_password != confirm_password:
+        flash("Passwords do not match.", "error")
+        return redirect(url_for("admin_user_detail", user_id=user_id))
+
+    try:
+        user = db.session.execute(
+            text("""
+                SELECT user_id, role, sponsor_org_id
+                FROM app_user
+                WHERE user_id = :user_id
+                  AND role IN ('DRIVER', 'SPONSOR')
+                FOR UPDATE
+            """),
+            {"user_id": user_id}
+        ).mappings().first()
+
+        if user is None:
+            db.session.rollback()
+            return "Driver or Sponsor account not found.", 404
+
+        password_hash = generate_password_hash(new_password)
+
+        db.session.execute(
+            text("""
+                UPDATE app_user
+                SET password_hash = :password_hash
+                WHERE user_id = :user_id
+            """),
+            {
+                "password_hash": password_hash,
+                "user_id": user_id
+            }
+        )
+
+        write_audit_log(
+            category="PASSWORD_CHANGE",
+            actor_user_id=session["user_id"],
+            target_user_id=user_id,
+            sponsor_org_id=user["sponsor_org_id"],
+            success=True,
+            reason="Admin reset account password",
+            detail={
+                "action": "ADMIN_PASSWORD_RESET",
+                "account_role": user["role"]
+            }
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Admin password reset failed")
+        return "Unable to reset account password.", 500
+
+    flash("Account password reset successfully.", "success")
+    return redirect(url_for("admin_user_detail", user_id=user_id))
+
+@app.get("/admin/audit-logs")
+def admin_audit_logs():
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
+    sort_order = request.args.get("sort", "newest")
+
+    if sort_order not in ("newest", "oldest"):
+        sort_order = "newest"
+
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+        end = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
+    except ValueError:
+        return "Invalid date.", 400
+
+    if start and end and start > end:
+        return "Start date cannot be after end date.", 400
+
+    query = """
+        SELECT
+            a.audit_id,
+            a.category,
+            a.event_time,
+            a.actor_user_id,
+            a.target_user_id,
+            a.sponsor_org_id,
+            a.success,
+            a.reason,
+            a.detail,
+            actor.email AS actor_email,
+            target.email AS target_email
+        FROM audit_log a
+        LEFT JOIN app_user actor
+            ON actor.user_id = a.actor_user_id
+        LEFT JOIN app_user target
+            ON target.user_id = a.target_user_id
+        WHERE 1 = 1
+    """
+
+    params = {}
+
+    if start:
+        query += " AND a.event_time >= :start_date"
+        params["start_date"] = start
+
+    if end:
+        query += " AND a.event_time < :end_date"
+        params["end_date"] = end + timedelta(days=1)
+
+    direction = "ASC" if sort_order == "oldest" else "DESC"
+
+    query += f"""
+        ORDER BY a.event_time {direction}, a.audit_id {direction}
+        LIMIT 200
+    """
+
+    logs = db.session.execute(
+        text(query), params
+    ).mappings().all()
+
+    return render_template(
+        "admin_audit_logs.html",
+        logs=logs,
+        start_date=start_date,
+        end_date=end_date,
+        sort_order=sort_order
+    )
+ 
 @app.route("/admin/organizations/<int:sponsor_org_id>")
 def admin_organization_detail(sponsor_org_id):
     if session.get("user_id") is None:
@@ -3317,6 +3663,7 @@ def driver_purchase_catalog_item(catalog_item_id):
             ),
             line_parameters,
         )
+        
         db.session.execute(
             text(
                 """
@@ -3330,7 +3677,28 @@ def driver_purchase_catalog_item(catalog_item_id):
             ),
             purchase_parameters,
         )
+
+        write_audit_log(
+            category="ORDER",
+            actor_user_id=session["user_id"],
+            target_user_id=session["user_id"],
+            sponsor_org_id=item["sponsor_org_id"],
+            success=True,
+            reason=f"Driver purchased {item['title']}",
+            detail={
+                "action": "ORDER_PLACED",
+                "order_id": order_id,
+                "catalog_item_id": catalog_item_id,
+                "product_title": item["title"],
+                "points_spent": points_price,
+                "previous_balance": item["point_balance"],
+                "new_balance": item["point_balance"] - points_price,
+                "order_status": "PLACED"
+            }
+        )
+
         db.session.commit()
+
     except Exception:
         db.session.rollback()
         app.logger.exception("Driver catalog purchase failed")
