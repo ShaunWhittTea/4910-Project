@@ -1020,3 +1020,152 @@ body {
         padding: 0.7rem;
     }
 }
+
+.account-management {
+    margin-top: 30px;
+    padding: 24px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.account-management form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 450px;
+}
+
+.account-management input,
+.account-management select,
+.account-management textarea {
+    padding: 10px;
+    font: inherit;
+}
+
+.account-management textarea {
+    min-height: 80px;
+}
+
+.account-management button {
+    padding: 12px;
+    cursor: pointer;
+}
+
+/* Admin Audit Log Page */
+
+.admin-audit-page {
+    min-height: 100vh;
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background:
+        linear-gradient(
+            rgba(10, 25, 45, 0.65),
+            rgba(10, 25, 45, 0.65)
+        ),
+        url("truckdigital.avif") center / cover fixed no-repeat;
+}
+
+.admin-audit-page .container {
+    width: 95%;
+    max-width: 1600px;
+    margin: 30px auto;
+    padding: 30px;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.96);
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+}
+
+.admin-audit-page h1 {
+    color: #102b4e;
+    margin-bottom: 25px;
+}
+
+.admin-audit-page .filters {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: flex-start;
+    gap: 15px;
+    padding: 20px;
+    margin-bottom: 25px;
+    background: #eef2f7;
+    border-radius: 8px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.admin-audit-page .filter-field {
+    display: flex;
+    flex-direction: column;
+    flex: 0 1 auto;
+    gap: 6px;
+}
+
+.admin-audit-page .filter-field label {
+    font-size: 14px;
+    font-weight: bold;
+    color: #102b4e;
+}
+
+.admin-audit-page input,
+.admin-audit-page select {
+    padding: 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    font: inherit;
+}
+
+.admin-audit-page button {
+    padding: 11px 18px;
+    background: #102b4e;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.admin-audit-page button:hover {
+    background: #1b467a;
+}
+
+.admin-audit-page .audit-table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.admin-audit-page table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    font-size: 14px;
+}
+
+.admin-audit-page th {
+    background: #102b4e;
+    color: white;
+    padding: 14px;
+    text-align: left;
+}
+
+.admin-audit-page td {
+    padding: 13px;
+    border-bottom: 1px solid #e2e8f0;
+    vertical-align: top;
+}
+
+.admin-audit-page tbody tr:hover {
+    background: #f1f5f9;
+}
+
+.admin-audit-page .details {
+    max-width: 280px;
+    overflow-wrap: anywhere;
+}
+
+.admin-audit-page .details pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
