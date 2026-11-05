@@ -103,6 +103,67 @@
         {% endif %}
 
     </dl>
+    
+    {% if user['role'] == 'DRIVER' %}
+
+    <section class="account-management">
+        <h2>Adjust Driver Points</h2>
+
+        <p>
+            Current Balance:
+            <strong>{{ user['point_balance'] }} points</strong>
+        </p>
+
+        <form method="POST"
+              action="{{ url_for('admin_adjust_driver_points', user_id=user['user_id']) }}">
+
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <label for="action">Adjustment Type</label>
+            <select id="action" name="action" required>
+                <option value="add">Add Points</option>
+                <option value="deduct">Deduct Points</option>
+            </select>
+
+            <label for="points">Number of Points</label>
+            <input type="number" id="points" name="points"
+                   min="1" step="1" required>
+
+            <label for="point_reason">Reason for Adjustment</label>
+            <textarea id="point_reason" name="reason"
+                      maxlength="500" required></textarea>
+
+            <button type="submit">Update Points</button>
+        </form>
+    </section>
+
+    {% endif %}
+
+    {% if user['role'] in ['DRIVER', 'SPONSOR'] %}
+
+    <section class="account-management">
+        <h2>Reset Account Password</h2>
+
+        <form method="POST"
+              action="{{ url_for('admin_reset_user_password', user_id=user['user_id']) }}">
+
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <label for="new_password">New Password</label>
+            <input type="password" id="new_password"
+                   name="new_password" minlength="12"
+                   autocomplete="new-password" required>
+
+            <label for="confirm_password">Confirm New Password</label>
+            <input type="password" id="confirm_password"
+                   name="confirm_password" minlength="12"
+                   autocomplete="new-password" required>
+
+            <button type="submit">Reset Password</button>
+        </form>
+    </section>
+
+    {% endif %}
 
     <div class="actions">
         <a class="button-link" href="{{ url_for('admin_user_index') }}">

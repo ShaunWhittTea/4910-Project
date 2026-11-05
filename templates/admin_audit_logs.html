@@ -1,0 +1,152 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Audit Logs</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body class="admin-audit-page">
+
+<main class="container">
+
+    <a href="{{ url_for('admin_home') }}">
+        Back to Admin Dashboard
+    </a>
+
+    <h1>Audit Logs</h1>
+
+    <form method="GET"
+          action="{{ url_for('admin_audit_logs') }}"
+          class="filters">
+
+        <div class="filter-field">
+            <label for="actor">Search by Actor</label>
+            <input type="search"
+                   id="actor"
+                   name="actor"
+                   placeholder="Name, email, or user ID"
+                   value="{{ actor_search }}">
+        </div>
+
+        <div class="filter-field">
+            <label for="start_date">Start Date</label>
+            <input type="date"
+                   id="start_date"
+                   name="start_date"
+                   value="{{ start_date }}">
+        </div>
+
+        <div class="filter-field">
+            <label for="end_date">End Date</label>
+            <input type="date"
+                   id="end_date"
+                   name="end_date"
+                   value="{{ end_date }}">
+        </div>
+
+        <div class="filter-field">
+            <label for="sort">Sort By</label>
+            <select id="sort" name="sort">
+                <option value="newest"
+                    {% if sort_order == 'newest' %}selected{% endif %}>
+                    Newest First
+                </option>
+                <option value="oldest"
+                    {% if sort_order == 'oldest' %}selected{% endif %}>
+                    Oldest First
+                </option>
+            </select>
+        </div>
+
+        <button type="submit">Apply Filters</button>
+
+        <a href="{{ url_for('admin_audit_logs') }}">
+            Clear Filters
+        </a>
+
+    </form>
+
+    <div class="audit-table-wrapper">
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Date / Time (UTC)</th>
+                    <th>Category</th>
+                    <th>Actor</th>
+                    <th>Target</th>
+                    <th>Success</th>
+                    <th>Reason</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td>{{ log.event_time }}</td>
+
+                    <td>{{ log.category }}</td>
+
+                    <td>
+                        {{ log.actor_email or log.actor_user_id or 'System' }}
+                    </td>
+
+                    <td>
+                        {% if log.target_user_id %}
+                            {{ log.target_email or log.target_user_id }}
+                        {% elif log.actor_user_id %}
+                            Self
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if log.success is none %}
+                            —
+                        {% elif log.success %}
+                            Yes
+                        {% else %}
+                            No
+                        {% endif %}
+                    </td>
+
+                    <td>{{ log.reason or '—' }}</td>
+
+                    <td class="details">
+                        {% if log.detail %}
+                            <details>
+                                <summary>View Details</summary>
+                                <pre>{{ log.detail | tojson(indent=2) }}</pre>
+                            </details>
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                </tr>
+
+                {% else %}
+                <tr>
+                    <td colspan="7">
+                        No audit logs found.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+    </div>
+
+    <p>Showing up to 200 audit records.</p>
+
+</main>
+
+</body>
+</html>

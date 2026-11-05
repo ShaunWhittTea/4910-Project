@@ -79,9 +79,17 @@
                 href="{{ url_for('admin_user_index') }}"
                 class="admin-management-card"
             >
-            <i class="fa-solid fa-users"></i>
             <h3>User Index</h3>
             <p>View and search all Admins, Sponsors, and Drivers.</p>
+            
+            <a href="{{ url_for('admin_audit_logs') }}"
+            class="admin-management-card"
+            >
+                <h3>Audits</h3>
+                <p>Spectate Audits produced across the application</p>
+            </a>
+            
+</a>
 </a>
 
         </div>
