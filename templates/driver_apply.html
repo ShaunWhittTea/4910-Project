@@ -16,7 +16,11 @@
         <p>{{ message }}</p>
     {% endif %}
 
-    <p>Fill out the application below to apply to a sponsor organization.</p>
+    {% if saved_application %}
+        <p>Review your saved application below. You can make changes before submitting it.</p>
+    {% else %}
+        <p>Fill out the application below to apply to a sponsor organization.</p>
+    {% endif %}
 
     <form method="POST">
 
@@ -25,6 +29,7 @@
             type="text"
             id="first_name"
             name="first_name"
+            value="{{ saved_application.first_name if saved_application else '' }}"
             required
         >
 
@@ -33,6 +38,7 @@
             type="text"
             id="last_name"
             name="last_name"
+            value="{{ saved_application.last_name if saved_application else '' }}"
             required
         >
 
@@ -41,6 +47,7 @@
             type="email"
             id="email"
             name="email"
+            value="{{ saved_application.email if saved_application else '' }}"
             required
         >
 
@@ -49,14 +56,25 @@
             type="text"
             id="phone"
             name="phone"
+            value="{{ saved_application.phone if saved_application and saved_application.phone else '' }}"
             required
         >
 
         <label for="has_license">Do you have a valid driver's license?</label>
         <select id="has_license" name="has_license" required>
             <option value="">Select an option</option>
-            <option value="YES">Yes</option>
-            <option value="NO">No</option>
+
+            {% if saved_license == "YES" %}
+                <option value="YES" selected>Yes</option>
+            {% else %}
+                <option value="YES">Yes</option>
+            {% endif %}
+
+            {% if saved_license == "NO" %}
+                <option value="NO" selected>No</option>
+            {% else %}
+                <option value="NO">No</option>
+            {% endif %}
         </select>
 
         <label for="sponsor_org_id">Organization</label>
@@ -64,43 +82,67 @@
             <option value="">Select an organization</option>
 
             {% for organization in organizations %}
-                <option value="{{ organization.sponsor_org_id }}">
-                    {{ organization.name }}
-                </option>
+                {% if saved_application and saved_application.sponsor_org_id == organization.sponsor_org_id %}
+                    <option value="{{ organization.sponsor_org_id }}" selected>
+                        {{ organization.name }}
+                    </option>
+                {% else %}
+                    <option value="{{ organization.sponsor_org_id }}">
+                        {{ organization.name }}
+                    </option>
+                {% endif %}
             {% endfor %}
-
         </select>
 
-        <label for="password">Create Password</label>
-        <input
-            type="password"
-            id="password"
-            name="password"
-            minlength="12"
-            autocomplete="new-password"
-            required
+        {% if not saved_application %}
+
+            <label for="password">Create Password</label>
+            <input
+                type="password"
+                id="password"
+                name="password"
+                minlength="12"
+                autocomplete="new-password"
+                required
+            >
+
+            <div class="password-requirements" aria-label="Password requirements">
+                <strong>Password requirements</strong>
+                <ul>
+                    {% for requirement in password_requirements %}
+                        <li>{{ requirement }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            <label for="confirm_password">Confirm Password</label>
+            <input
+                type="password"
+                id="confirm_password"
+                name="confirm_password"
+                minlength="12"
+                autocomplete="new-password"
+                required
+            >
+
+        {% endif %}
+
+        <button
+            type="submit"
+            name="action"
+            value="save"
+            formnovalidate
         >
+            Save Application
+        </button>
 
-        <div class="password-requirements" aria-label="Password requirements">
-            <strong>Password requirements</strong>
-            <ul>
-                {% for requirement in password_requirements %}
-                    <li>{{ requirement }}</li>
-                {% endfor %}
-            </ul>
-        </div>
-
-        <label for="confirm_password">Confirm Password</label>
-        <input
-            type="password"
-            id="confirm_password"
-            name="confirm_password"
-            minlength="12"
-            autocomplete="new-password"
-            required
+        <button
+            type="submit"
+            name="action"
+            value="submit"
         >
-
-        <button type="submit">Submit Application</button>
+            Submit Application
+        </button>
 
     </form>
 

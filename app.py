@@ -385,12 +385,15 @@ def login():
                     },
                 ).mappings().first()
 
-                if application is not None and application["status"] in ("PENDING", "REJECTED"):
+                if application is not None and application["status"] in ("INCOMPLETE", "PENDING", "REJECTED"):
                     session["user_id"] = user["user_id"]
                     session["role"] = user["role"]
 
                     if user["sponsor_org_id"] is not None:
                         session["sponsor_org_id"] = user["sponsor_org_id"]
+
+                    if application["status"] == "INCOMPLETE":
+                        return redirect(url_for("driver_apply"))
 
                     return redirect(url_for("application_status"))
 
@@ -1671,6 +1674,38 @@ def sponsor_create_user():
 def driver_apply():
     message = None
 
+    saved_application = None
+    saved_license = ""
+
+    if session.get("role") == "DRIVER" and session.get("user_id"):
+        saved_application = db.session.execute(
+            text(
+                """
+                SELECT
+                    u.first_name,
+                    u.last_name,
+                    u.email,
+                    u.phone,
+                    da.sponsor_org_id,
+                    da.reason
+                FROM app_user u
+                JOIN driver_application da
+                    ON da.driver_user_id = u.user_id
+                WHERE u.user_id = :user_id
+                  AND da.status = 'INCOMPLETE'
+                ORDER BY da.created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"user_id": session["user_id"]},
+        ).mappings().first()
+
+        if saved_application and saved_application["reason"]:
+            if saved_application["reason"].endswith("YES"):
+                saved_license = "YES"
+            elif saved_application["reason"].endswith("NO"):
+                saved_license = "NO"
+
     organizations = db.session.execute(
         text(
             """
@@ -1683,6 +1718,8 @@ def driver_apply():
     ).mappings().all()
 
     if request.method == "POST":
+        action = request.form.get("action", "submit")
+
         first_name = request.form.get("first_name", "").strip()
         last_name = request.form.get("last_name", "").strip()
         email = request.form.get("email", "").strip().lower()
@@ -1692,122 +1729,201 @@ def driver_apply():
         password = request.form.get("password", "")
         confirm_password = request.form.get("confirm_password", "")
 
-        if (
+        if action == "save" and (
+            not first_name
+            or not last_name
+            or not email
+            or not sponsor_org_id
+            or (saved_application is None and not password)
+            or (saved_application is None and not confirm_password)
+        ):
+            message = (
+                "First name, last name, email, organization, password, "
+                "and password confirmation are required to save your application."
+            )
+
+        elif action == "submit" and (
             not first_name
             or not last_name
             or not email
             or not phone
             or not has_license
             or not sponsor_org_id
-            or not password
-            or not confirm_password
+            or (saved_application is None and not password)
+            or (saved_application is None and not confirm_password)
         ):
             message = "Please complete all fields."
 
-        elif password != confirm_password:
+        elif saved_application is None and password != confirm_password:
             message = "Passwords do not match."
 
-        elif get_password_validation_errors(password):
+        elif saved_application is None and get_password_validation_errors(password):
             message = format_password_validation_errors(
                 get_password_validation_errors(password)
             )
 
         else:
+            application_status = (
+                "INCOMPLETE" if action == "save" else "PENDING"
+            )
+
             try:
-                existing_user = db.session.execute(
-                    text(
-                        """
-                        SELECT user_id
-                        FROM app_user
-                        WHERE email = :email
-                        """
-                    ),
-                    {"email": email},
-                ).first()
+                if saved_application is not None:
+                    driver_user_id = session["user_id"]
 
-                if existing_user is not None:
-                    message = "An account with that email already exists."
-
-                else:
-                    # Create the applicant's pending driver account.
-                    result = db.session.execute(
-                        text(
-                            """
-                            INSERT INTO app_user
-                                (role,
-                                 email,
-                                 password_hash,
-                                 first_name,
-                                 last_name,
-                                 phone,
-                                 status,
-                                 sponsor_org_id)
-                            VALUES
-                                ('DRIVER',
-                                 :email,
-                                 :password_hash,
-                                 :first_name,
-                                 :last_name,
-                                 :phone,
-                                 'PENDING',
-                                 :sponsor_org_id)
-                            """
-                        ),
-                        {
-                            "email": email,
-                            "password_hash": generate_password_hash(password),
-                            "first_name": first_name,
-                            "last_name": last_name,
-                            "phone": phone,
-                            "sponsor_org_id": sponsor_org_id,
-                        },
-                    )
-
-                    driver_user_id = result.lastrowid
-
-                    # Create the pending application.
                     db.session.execute(
                         text(
                             """
-                            INSERT INTO driver_application
-                                (driver_user_id,
-                                 sponsor_org_id,
-                                 status,
-                                 reason)
-                            VALUES
-                                (:driver_user_id,
-                                 :sponsor_org_id,
-                                 'PENDING',
-                                 :reason)
+                            UPDATE app_user
+                            SET first_name = :first_name,
+                                last_name = :last_name,
+                                email = :email,
+                                phone = :phone,
+                                sponsor_org_id = :sponsor_org_id
+                            WHERE user_id = :user_id
                             """
                         ),
                         {
-                            "driver_user_id": driver_user_id,
+                            "first_name": first_name,
+                            "last_name": last_name,
+                            "email": email,
+                            "phone": phone,
                             "sponsor_org_id": sponsor_org_id,
-                            "reason": (
-                                "Valid driver's license: "
-                                + has_license
-                            ),
+                            "user_id": driver_user_id,
+                        },
+                    )
+
+                    db.session.execute(
+                        text(
+                            """
+                            UPDATE driver_application
+                            SET sponsor_org_id = :sponsor_org_id,
+                                status = :application_status,
+                                reason = :reason
+                            WHERE driver_user_id = :driver_user_id
+                              AND status = 'INCOMPLETE'
+                            """
+                        ),
+                        {
+                            "sponsor_org_id": sponsor_org_id,
+                            "application_status": application_status,
+                            "reason": "Valid driver's license: " + has_license,
+                            "driver_user_id": driver_user_id,
                         },
                     )
 
                     db.session.commit()
 
-                    message = (
-                        "Application submitted successfully. "
-                        "You can now use your login information "
-                        "to check your application status."
-                    )
+                    if action == "save":
+                        message = (
+                            "Application saved successfully. "
+                            "You can log back in later to finish your application."
+                        )
+                    else:
+                        return redirect(url_for("application_status"))
+
+                else:
+                    existing_user = db.session.execute(
+                        text(
+                            """
+                            SELECT user_id
+                            FROM app_user
+                            WHERE email = :email
+                            """
+                        ),
+                        {"email": email},
+                    ).first()
+
+                    if existing_user is not None:
+                        message = "An account with that email already exists."
+
+                    else:
+                        result = db.session.execute(
+                            text(
+                                """
+                                INSERT INTO app_user
+                                    (role,
+                                     email,
+                                     password_hash,
+                                     first_name,
+                                     last_name,
+                                     phone,
+                                     status,
+                                     sponsor_org_id)
+                                VALUES
+                                    ('DRIVER',
+                                     :email,
+                                     :password_hash,
+                                     :first_name,
+                                     :last_name,
+                                     :phone,
+                                     'PENDING',
+                                     :sponsor_org_id)
+                                """
+                            ),
+                            {
+                                "email": email,
+                                "password_hash": generate_password_hash(password),
+                                "first_name": first_name,
+                                "last_name": last_name,
+                                "phone": phone,
+                                "sponsor_org_id": sponsor_org_id,
+                            },
+                        )
+
+                        driver_user_id = result.lastrowid
+
+                        db.session.execute(
+                            text(
+                                """
+                                INSERT INTO driver_application
+                                    (driver_user_id,
+                                     sponsor_org_id,
+                                     status,
+                                     reason)
+                                VALUES
+                                    (:driver_user_id,
+                                     :sponsor_org_id,
+                                     :application_status,
+                                     :reason)
+                                """
+                            ),
+                            {
+                                "driver_user_id": driver_user_id,
+                                "sponsor_org_id": sponsor_org_id,
+                                "application_status": application_status,
+                                "reason": "Valid driver's license: " + has_license,
+                            },
+                        )
+
+                        db.session.commit()
+
+                        if action == "save":
+                            message = (
+                                "Application saved successfully. "
+                                "You can log back in later to finish your application."
+                            )
+                        else:
+                            message = (
+                                "Application submitted successfully. "
+                                "You can now use your login information "
+                                "to check your application status."
+                            )
 
             except Exception:
                 db.session.rollback()
                 app.logger.exception("Driver application submission failed")
-                message = "Unable to submit application. Please try again."
+                message = (
+                    "Unable to save or submit application. "
+                    "Please try again."
+                )
 
     return render_template(
         "driver_apply.html",
         organizations=organizations,
         message=message,
+        saved_application=saved_application,
+        saved_license=saved_license,
         password_requirements=get_password_requirements(),
     )
 
