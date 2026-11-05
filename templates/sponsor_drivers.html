@@ -27,6 +27,23 @@
                 <button type="button">Edit Driver</button>
             </a>
 
+            {% if driver.status == 'ACTIVE' %}
+                <form
+                    method="POST"
+                    action="{{ url_for('sponsor_impersonate_driver', driver_user_id=driver.user_id) }}"
+                >
+                    <button type="submit">View as Driver</button>
+                </form>
+
+                <form
+                    method="POST"
+                    action="{{ url_for('sponsor_remove_driver', driver_user_id=driver.user_id) }}"
+                    onsubmit="return confirm('Are you sure you want to remove this driver from your organization?');"
+                >
+                    <button type="submit">Remove Driver</button>
+                </form>
+            {% endif %}
+
             <hr>
 
         {% endfor %}

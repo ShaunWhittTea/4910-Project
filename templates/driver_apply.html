@@ -76,14 +76,27 @@
             type="password"
             id="password"
             name="password"
+            minlength="12"
+            autocomplete="new-password"
             required
         >
+
+        <div class="password-requirements" aria-label="Password requirements">
+            <strong>Password requirements</strong>
+            <ul>
+                {% for requirement in password_requirements %}
+                    <li>{{ requirement }}</li>
+                {% endfor %}
+            </ul>
+        </div>
 
         <label for="confirm_password">Confirm Password</label>
         <input
             type="password"
             id="confirm_password"
             name="confirm_password"
+            minlength="12"
+            autocomplete="new-password"
             required
         >
 
