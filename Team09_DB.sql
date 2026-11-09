@@ -62,7 +62,7 @@ CREATE TABLE driver_application (
   application_id  INT AUTO_INCREMENT PRIMARY KEY,
   driver_user_id  INT NOT NULL,
   sponsor_org_id  INT NOT NULL,
-  status          ENUM('PENDING','APPROVED','REJECTED','REVOKED')
+  status            ENUM('INCOMPLETE','PENDING','APPROVED','REJECTED','REVOKED')
                     NOT NULL DEFAULT 'PENDING',
   reason          VARCHAR(500),
   decided_by      INT NULL,
