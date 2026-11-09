@@ -35,6 +35,28 @@
         </div>
 
         <div class="filter-field">
+            <label for="category">Category</label>
+            <select id="category" name="category">
+                <option value="">All Categories</option>
+
+                {% for item in [
+                    'APPLICATION',
+                    'POINT_CHANGE',
+                    'PASSWORD_CHANGE',
+                    'LOGIN_ATTEMPT',
+                    'ACCOUNT',
+                    'IMPERSONATION',
+                    'ORDER'
+                ] %}
+                <option value="{{ item }}"
+                    {% if category_filter == item %}selected{% endif %}>
+                    {{ item.replace('_', ' ').title() }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="filter-field">
             <label for="start_date">Start Date</label>
             <input type="date"
                    id="start_date"
@@ -83,7 +105,6 @@
                     <th>Target</th>
                     <th>Success</th>
                     <th>Reason</th>
-                    <th>Details</th>
                 </tr>
             </thead>
 
@@ -119,22 +140,11 @@
                     </td>
 
                     <td>{{ log.reason or '—' }}</td>
-
-                    <td class="details">
-                        {% if log.detail %}
-                            <details>
-                                <summary>View Details</summary>
-                                <pre>{{ log.detail | tojson(indent=2) }}</pre>
-                            </details>
-                        {% else %}
-                            —
-                        {% endif %}
-                    </td>
                 </tr>
 
                 {% else %}
                 <tr>
-                    <td colspan="7">
+                    <td colspan="6">
                         No audit logs found.
                     </td>
                 </tr>

@@ -1258,6 +1258,7 @@ def admin_reset_user_password(user_id):
     flash("Account password reset successfully.", "success")
     return redirect(url_for("admin_user_detail", user_id=user_id))
 
+
 @app.get("/admin/audit-logs")
 def admin_audit_logs():
     if session.get("user_id") is None:
@@ -1269,6 +1270,8 @@ def admin_audit_logs():
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
     sort_order = request.args.get("sort", "newest")
+    actor_search = request.args.get("actor", "").strip()
+    category_filter = request.args.get("category", "").strip()
 
     if sort_order not in ("newest", "oldest"):
         sort_order = "newest"
@@ -1305,6 +1308,34 @@ def admin_audit_logs():
 
     params = {}
 
+    if actor_search:
+        query += """
+            AND (
+                actor.email LIKE :actor_search
+                OR a.username_attempted LIKE :actor_search
+                OR CAST(a.actor_user_id AS CHAR) = :actor_id
+            )
+        """
+        params["actor_search"] = f"%{actor_search}%"
+        params["actor_id"] = actor_search
+
+    valid_categories = (
+        "APPLICATION",
+        "POINT_CHANGE",
+        "PASSWORD_CHANGE",
+        "LOGIN_ATTEMPT",
+        "ACCOUNT",
+        "IMPERSONATION",
+        "ORDER"
+    )
+
+    if category_filter:
+        if category_filter not in valid_categories:
+            return "Invalid category.", 400
+
+        query += " AND a.category = :category"
+        params["category"] = category_filter
+
     if start:
         query += " AND a.event_time >= :start_date"
         params["start_date"] = start
@@ -1329,8 +1360,11 @@ def admin_audit_logs():
         logs=logs,
         start_date=start_date,
         end_date=end_date,
-        sort_order=sort_order
+        sort_order=sort_order,
+        actor_search=actor_search,
+        category_filter=category_filter
     )
+
  
 @app.route("/admin/organizations/<int:sponsor_org_id>")
 def admin_organization_detail(sponsor_org_id):
