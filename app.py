@@ -2317,6 +2317,7 @@ def application_status():
         text(
             """
             SELECT a.status,
+                   a.decision_reason,
                    o.name AS organization_name
             FROM driver_application a
             JOIN sponsor_org o
@@ -2468,6 +2469,11 @@ def sponsor_approve_application(application_id):
 @sponsor_required
 def sponsor_reject_application(application_id):
 
+    decision_reason = request.form.get("decision_reason", "").strip()
+
+    if not decision_reason:
+        return "A rejection reason is required.", 400
+
     application = db.session.execute(
         text(
             """
@@ -2493,12 +2499,14 @@ def sponsor_reject_application(application_id):
                 """
                 UPDATE driver_application
                 SET status = 'REJECTED',
+                    decision_reason = :decision_reason,
                     decided_by = :decided_by,
                     decided_at = CURRENT_TIMESTAMP
                 WHERE application_id = :application_id
                 """
             ),
             {
+                "decision_reason": decision_reason,
                 "decided_by": session["user_id"],
                 "application_id": application_id,
             },

@@ -65,6 +65,7 @@ CREATE TABLE driver_application (
   status            ENUM('INCOMPLETE','PENDING','APPROVED','REJECTED','REVOKED')
                     NOT NULL DEFAULT 'PENDING',
   reason          VARCHAR(500),
+  decision_reason VARCHAR(500) NULL,
   decided_by      INT NULL,
   decided_at      TIMESTAMP NULL,
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

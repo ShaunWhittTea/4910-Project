@@ -59,8 +59,19 @@
                 <form
                     method="POST"
                     action="{{ url_for('sponsor_reject_application', application_id=application.application_id) }}"
-                    style="display: inline;"
                 >
+                    <label for="decision_reason_{{ application.application_id }}">
+                        Reason for rejection:
+                    </label>
+
+                    <input
+                        type="text"
+                        id="decision_reason_{{ application.application_id }}"
+                        name="decision_reason"
+                        maxlength="500"
+                        required
+                    >
+
                     <button type="submit">Reject</button>
                 </form>
 
