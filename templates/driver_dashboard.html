@@ -9,6 +9,8 @@
 </head>
 
 <body>
+    {% include 'impersonation_banner.html' %}
+
 <main class="container">
     <h1>Driver Dashboard</h1>
 
@@ -35,15 +37,42 @@
             My Purchases
         </a>
 
-        {% if session.get('impersonating_driver') %}
-            <form class="inline-form" method="POST" action="{{ url_for('sponsor_stop_impersonating') }}">
-                <button type="submit">Return to Sponsor</button>
-            </form>
-        {% else %}
-            <form class="inline-form" method="POST" action="{{ url_for('driver_logout') }}">
-                <button type="submit">Sign Out</button>
-            </form>
-        {% endif %}
+       
+
+{% if session.get('impersonator_admin_id') is not none %}
+
+    <form class="inline-form"
+          method="POST"
+          action="{{ url_for('admin_stop_impersonation') }}">
+
+        <input type="hidden"
+               name="csrf_token"
+               value="{{ csrf_token() }}">
+
+        <button type="submit">Sign Out</button>
+    </form>
+
+{% elif session.get('impersonating_driver') %}
+
+    <form class="inline-form"
+          method="POST"
+          action="{{ url_for('sponsor_stop_impersonating') }}">
+
+        <button type="submit">Return to Sponsor</button>
+    </form>
+
+{% else %}
+
+    <form class="inline-form"
+          method="POST"
+          action="{{ url_for('driver_logout') }}">
+
+        <button type="submit">Sign Out</button>
+    </form>
+
+{% endif %}
+
+
     </div>
 </main>
 </body>

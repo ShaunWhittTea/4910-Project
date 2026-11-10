@@ -143,6 +143,8 @@ INVALID_RESET_LINK_MESSAGE = (
     "used. Request a new link to continue."
 )
 
+def get_audit_actor_id():
+    return session.get("impersonator_admin_id") or session.get("user_id")
 
 def get_password_validation_errors(password):
     """Return each unmet password-complexity requirement."""
@@ -714,8 +716,18 @@ def driver_reset_password(token):
 
 @app.route("/logout", methods=["GET", "POST"])
 def logout():
+    if session.get("impersonator_admin_id") is not None:
+        return redirect(url_for("impersonation_logout_notice"))
+
     session.clear()
     return redirect(url_for("login"))
+
+@app.route("/impersonation/logout-notice")
+def impersonation_logout_notice():
+    if session.get("impersonator_admin_id") is None:
+        return redirect(url_for("login"))
+
+    return render_template("impersonation_logout_notice.html")
 
 
 # 25132 & 25134 - Implement Sponsor Login Functionality ...
@@ -1178,6 +1190,123 @@ def admin_adjust_driver_points(user_id):
 
     flash("Driver points updated successfully.", "success")
     return redirect(url_for("admin_user_detail", user_id=user_id))
+
+
+@app.post("/admin/users/<int:user_id>/impersonate")
+def admin_start_impersonation(user_id):
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    if session.get("impersonator_admin_id") is not None:
+        return "Already impersonating an account.", 403
+
+    if not valid_csrf_token():
+        return "Invalid form token.", 400
+
+    target = db.session.execute(
+        text("""
+            SELECT
+                u.user_id,
+                u.role,
+                u.status,
+                CASE
+                    WHEN u.role = 'DRIVER'
+                        THEN dp.sponsor_org_id
+                    ELSE u.sponsor_org_id
+                END AS sponsor_org_id
+            FROM app_user AS u
+            LEFT JOIN driver_profile AS dp
+                ON dp.user_id = u.user_id
+            WHERE u.user_id = :user_id
+        """),
+        {"user_id": user_id}
+    ).mappings().first()
+
+    if target is None:
+        return "User not found.", 404
+
+    if target["role"] not in ("DRIVER", "SPONSOR"):
+        return "This account cannot be impersonated.", 403
+
+    if target["status"] != "ACTIVE":
+        return "Only active accounts can be impersonated.", 403
+
+    admin_id = session["user_id"]
+
+    try:
+        write_audit_log(
+            category="IMPERSONATION",
+            actor_user_id=admin_id,
+            target_user_id=user_id,
+            sponsor_org_id=target["sponsor_org_id"],
+            success=True,
+            reason="Admin started impersonation",
+            detail={
+                "action": "IMPERSONATION_STARTED",
+                "impersonated_role": target["role"]
+            }
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Failed to audit impersonation start")
+        return "Unable to start impersonation.", 500
+
+    session["impersonator_admin_id"] = admin_id
+    session["impersonated_user_detail_id"] = user_id
+    session["user_id"] = target["user_id"]
+    session["role"] = target["role"]
+    session.pop("sponsor_org_id", None)
+
+    if target["sponsor_org_id"] is not None:
+        session["sponsor_org_id"] = target["sponsor_org_id"]
+
+    return redirect(url_for(ROLE_HOME_PAGES[target["role"]]))
+
+
+@app.post("/admin/stop-impersonation")
+def admin_stop_impersonation():
+    admin_id = session.get("impersonator_admin_id")
+
+    if admin_id is None:
+        return "No active impersonation.", 403
+
+    if not valid_csrf_token():
+        return "Invalid form token.", 400
+
+    impersonated_user_id = session.get("user_id")
+    sponsor_org_id = session.get("sponsor_org_id")
+
+    try:
+        write_audit_log(
+            category="IMPERSONATION",
+            actor_user_id=admin_id,
+            target_user_id=impersonated_user_id,
+            sponsor_org_id=sponsor_org_id,
+            success=True,
+            reason="Admin ended impersonation",
+            detail={
+                "action": "IMPERSONATION_ENDED"
+            }
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Failed to audit impersonation end")
+        return "Unable to end impersonation.", 500
+
+    user_detail_id = session.get("impersonated_user_detail_id")
+    session.clear()
+    session["user_id"] = admin_id
+    session["role"] = "ADMIN"
+
+    if user_detail_id is not None:
+     return redirect(url_for("admin_user_detail", user_id=user_detail_id))
+
+    return redirect(url_for("admin_home"))
 
 
 @app.post("/admin/users/<int:user_id>/reset-password")
@@ -3549,8 +3678,12 @@ def driver_profile():
 
 @app.route("/driver/logout", methods=["GET", "POST"])
 def driver_logout():
+    if session.get("impersonator_admin_id") is not None:
+        return redirect(url_for("driver_dashboard"))
+
     session.clear()
     return redirect(url_for("driver_login"))
+
 
 # Catalog browsing, sponsor isolation, secured catalog API
 
@@ -3757,6 +3890,7 @@ def driver_purchase_catalog_item(catalog_item_id):
 
         purchase_parameters = {
             "driver_user_id": session["user_id"],
+            "actor_user_id": get_audit_actor_id(),
             "sponsor_org_id": item["sponsor_org_id"],
             "catalog_item_id": item["catalog_item_id"],
             "external_product_id": item["external_product_id"],
@@ -3794,7 +3928,7 @@ def driver_purchase_catalog_item(catalog_item_id):
                     (driver_user_id, sponsor_org_id, placed_by_user_id,
                      status, total_points, total_usd)
                 VALUES
-                    (:driver_user_id, :sponsor_org_id, :driver_user_id,
+                    (:driver_user_id, :sponsor_org_id, :actor_user_id,
                      'PLACED', :points_price, :price_usd)
                 """
             ),
@@ -3829,7 +3963,7 @@ def driver_purchase_catalog_item(catalog_item_id):
                     (driver_user_id, sponsor_org_id, actor_user_id,
                      points, reason)
                 VALUES
-                    (:driver_user_id, :sponsor_org_id, :driver_user_id,
+                    (:driver_user_id, :sponsor_org_id, :actor_user_id,
                      -:points_price, :reason)
                 """
             ),
@@ -3838,7 +3972,7 @@ def driver_purchase_catalog_item(catalog_item_id):
 
         write_audit_log(
             category="ORDER",
-            actor_user_id=session["user_id"],
+            actor_user_id=get_audit_actor_id(),
             target_user_id=session["user_id"],
             sponsor_org_id=item["sponsor_org_id"],
             success=True,
@@ -3851,8 +3985,8 @@ def driver_purchase_catalog_item(catalog_item_id):
                 "points_spent": points_price,
                 "previous_balance": item["point_balance"],
                 "new_balance": item["point_balance"] - points_price,
-                "order_status": "PLACED"
-            }
+                "order_status": "PLACED",
+                "impersonation": session.get("impersonator_admin_id") is not None            }
         )
 
         db.session.commit()

@@ -1,0 +1,27 @@
+
+{% if session.get("impersonator_admin_id") is not none %}
+
+<div class="impersonation-banner">
+    <div>
+        <strong>ADMIN IMPERSONATION ACTIVE</strong>
+        <p>
+            You are currently acting as
+            {{ session.get("role")|title }}
+            #{{ session.get("user_id") }}.
+        </p>
+    </div>
+
+    <form method="POST"
+          action="{{ url_for('admin_stop_impersonation') }}">
+
+        <input type="hidden"
+               name="csrf_token"
+               value="{{ csrf_token() }}">
+
+        <button type="submit">
+            Return to Admin Account
+        </button>
+    </form>
+</div>
+
+{% endif %}
