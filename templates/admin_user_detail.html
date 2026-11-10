@@ -165,6 +165,53 @@
 
     {% endif %}
 
+{% if user['role'] in ['DRIVER', 'SPONSOR'] %}
+
+<section class="account-management">
+    <h2>Account Impersonation</h2>
+
+    <p>
+        Access this account as an administrator for
+        troubleshooting and support.
+    </p>
+
+    <form method="POST"
+          action="{{ url_for('admin_start_impersonation', user_id=user['user_id']) }}">
+
+        <input type="hidden"
+               name="csrf_token"
+               value="{{ csrf_token() }}">
+
+        <button type="submit">
+            Impersonate {{ user['first_name'] }} {{ user['last_name'] }}
+        </button>
+    </form>
+</section>
+
+{% endif %}
+
+{% if session.get('impersonator_admin_id') %}
+
+<div class="impersonation-banner">
+    <p>
+        You are currently impersonating this account.
+    </p>
+
+    <form method="POST"
+          action="{{ url_for('admin_stop_impersonation') }}">
+
+        <input type="hidden"
+               name="csrf_token"
+               value="{{ csrf_token() }}">
+
+        <button type="submit">
+            Stop Impersonation
+        </button>
+    </form>
+</div>
+
+{% endif %}
+
     <div class="actions">
         <a class="button-link" href="{{ url_for('admin_user_index') }}">
             Back to User Index
