@@ -36,6 +36,19 @@
             was not approved at this time.
         </p>
 
+        {% if application.decision_reason %}
+            <p>
+                <strong>Reason:</strong>
+                {{ application.decision_reason }}
+            </p>
+        {% endif %}
+
+        <p>
+            If you have questions about this decision, please contact
+            <strong>{{ application.organization_name }}</strong>
+            for more information.
+        </p>
+
     {% endif %}
 
     <a href="{{ url_for('logout') }}">
