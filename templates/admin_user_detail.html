@@ -47,20 +47,73 @@
 
             <div>
                 <dt>Status</dt>
-                <dd>{{ user['status'] }}</dd>
+                <dd>
+                    <form method="POST"
+                          action="{{ url_for('admin_change_driver_status', user_id=user['user_id']) }}">
+
+                        <input type="hidden"
+                               name="csrf_token"
+                               value="{{ csrf_token() }}">
+
+                        <select name="status">
+                            <option value="PENDING"
+                                {% if user['status'] == 'PENDING' %}selected{% endif %}>
+                                PENDING
+                            </option>
+                            <option value="ACTIVE"
+                                {% if user['status'] == 'ACTIVE' %}selected{% endif %}>
+                                ACTIVE
+                            </option>
+                            <option value="INACTIVE"
+                                {% if user['status'] == 'INACTIVE' %}selected{% endif %}>
+                                INACTIVE
+                            </option>
+                        </select>
+
+                        <button type="submit">Save Status</button>
+                    </form>
+                </dd>
+            </div>
+
+            <div>
+                <dt>Application Status</dt>
+                <dd>
+                    {% if application %}
+                        {{ application['status'] }}
+                    {% else %}
+                        No application on record
+                    {% endif %}
+                </dd>
             </div>
 
             <div>
                 <dt>Sponsor Organization</dt>
                 <dd>
-                    {% if user['sponsor_org_id'] %}
-                        <a href="{{ url_for('admin_organization_detail',
-                                           sponsor_org_id=user['sponsor_org_id']) }}">
-                            {{ user['organization_name'] }}
-                        </a>
-                    {% else %}
-                        Not assigned
-                    {% endif %}
+                    <form method="POST"
+                          action="{{ url_for('admin_change_driver_org', user_id=user['user_id']) }}">
+
+                        <input type="hidden"
+                               name="csrf_token"
+                               value="{{ csrf_token() }}">
+
+                        <select name="sponsor_org_id">
+                            <option value=""
+                                {% if user['sponsor_org_id'] is none %}selected{% endif %}>
+                                Not Assigned
+                            </option>
+
+                            {% for org in sponsor_organizations %}
+                                <option value="{{ org['sponsor_org_id'] }}"
+                                    {% if user['sponsor_org_id'] == org['sponsor_org_id'] %}
+                                        selected
+                                    {% endif %}>
+                                    {{ org['name'] }}
+                                </option>
+                            {% endfor %}
+                        </select>
+
+                        <button type="submit">Save Organization</button>
+                    </form>
                 </dd>
             </div>
 
@@ -103,7 +156,7 @@
         {% endif %}
 
     </dl>
-    
+
     {% if user['role'] == 'DRIVER' %}
 
     <section class="account-management">
@@ -165,52 +218,100 @@
 
     {% endif %}
 
-{% if user['role'] in ['DRIVER', 'SPONSOR'] %}
+    {% if user['role'] in ['DRIVER', 'SPONSOR'] %}
 
-<section class="account-management">
-    <h2>Account Impersonation</h2>
+    <section class="account-management">
+        <h2>Account Impersonation</h2>
 
-    <p>
-        Access this account as an administrator for
-        troubleshooting and support.
-    </p>
+        <p>
+            Access this account as an administrator for
+            troubleshooting and support.
+        </p>
 
-    <form method="POST"
-          action="{{ url_for('admin_start_impersonation', user_id=user['user_id']) }}">
+        <form method="POST"
+              action="{{ url_for('admin_start_impersonation', user_id=user['user_id']) }}">
 
-        <input type="hidden"
-               name="csrf_token"
-               value="{{ csrf_token() }}">
+            <input type="hidden"
+                   name="csrf_token"
+                   value="{{ csrf_token() }}">
 
-        <button type="submit">
-            Impersonate {{ user['first_name'] }} {{ user['last_name'] }}
+            <button type="submit">
+                Impersonate {{ user['first_name'] }} {{ user['last_name'] }}
+            </button>
+        </form>
+    </section>
+
+    {% endif %}
+
+    {% if user['role'] in ['DRIVER', 'SPONSOR'] %}
+
+    <section class="account-management">
+        <h2>Deactivate Account</h2>
+
+        <p>
+            Deactivate this {{ user['role']|lower }} account.
+            This action requires confirmation.
+        </p>
+
+        <button type="button"
+                id="open-delete-confirmation">
+            Deactivate Account
         </button>
-    </form>
-</section>
 
-{% endif %}
+        <dialog id="delete-confirmation">
+            <h3>Confirm Account Deactivation</h3>
 
-{% if session.get('impersonator_admin_id') %}
+            <p>
+                Are you sure you want to deactivate
+                {{ user['first_name'] }} {{ user['last_name'] }}'s account?
+            </p>
 
-<div class="impersonation-banner">
-    <p>
-        You are currently impersonating this account.
-    </p>
+            <p>
+                This action may be permanent and cannot be undone.
+            </p>
 
-    <form method="POST"
-          action="{{ url_for('admin_stop_impersonation') }}">
+            <form method="POST"
+                  action="{{ url_for('admin_delete_user', user_id=user['user_id']) }}">
 
-        <input type="hidden"
-               name="csrf_token"
-               value="{{ csrf_token() }}">
+                <input type="hidden"
+                       name="csrf_token"
+                       value="{{ csrf_token() }}">
 
-        <button type="submit">
-            Stop Impersonation
-        </button>
-    </form>
-</div>
+                <button type="button"
+                        id="cancel-delete">
+                    Cancel
+                </button>
 
-{% endif %}
+                <button type="submit">
+                    Confirm Deactivation
+                </button>
+            </form>
+        </dialog>
+    </section>
+
+    {% endif %}
+
+    {% if session.get('impersonator_admin_id') %}
+
+    <div class="impersonation-banner">
+        <p>
+            You are currently impersonating this account.
+        </p>
+
+        <form method="POST"
+              action="{{ url_for('admin_stop_impersonation') }}">
+
+            <input type="hidden"
+                   name="csrf_token"
+                   value="{{ csrf_token() }}">
+
+            <button type="submit">
+                Stop Impersonation
+            </button>
+        </form>
+    </div>
+
+    {% endif %}
 
     <div class="actions">
         <a class="button-link" href="{{ url_for('admin_user_index') }}">
@@ -219,6 +320,22 @@
     </div>
 
 </main>
+
+<script>
+    const deleteDialog = document.getElementById("delete-confirmation");
+    const openDeleteButton = document.getElementById("open-delete-confirmation");
+    const cancelDeleteButton = document.getElementById("cancel-delete");
+
+    if (deleteDialog && openDeleteButton && cancelDeleteButton) {
+        openDeleteButton.addEventListener("click", function () {
+            deleteDialog.showModal();
+        });
+
+        cancelDeleteButton.addEventListener("click", function () {
+            deleteDialog.close();
+        });
+    }
+</script>
 
 </body>
 </html>
