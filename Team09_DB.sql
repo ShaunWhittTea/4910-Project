@@ -45,7 +45,7 @@ CREATE INDEX idx_user_org  ON app_user(sponsor_org_id);
 -- driver" (slide 8) at the schema level.
 CREATE TABLE driver_profile (
   user_id           INT PRIMARY KEY,
-  sponsor_org_id    INT NOT NULL,
+  sponsor_org_id    INT NULL,
   point_balance     INT NOT NULL DEFAULT 0,
   shipping_address  VARCHAR(400),
   CONSTRAINT fk_driver_user FOREIGN KEY (user_id)

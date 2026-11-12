@@ -1079,9 +1079,36 @@ def admin_user_detail(user_id):
     if user is None:
         return "User not found.", 404
 
+    application = None
+    sponsor_organizations = []
+
+    if user["role"] == "DRIVER":
+        application = db.session.execute(
+            text("""
+                SELECT application_id, status, sponsor_org_id,
+                       created_at, decided_at
+                FROM driver_application
+                WHERE driver_user_id = :user_id
+                ORDER BY created_at DESC, application_id DESC
+                LIMIT 1
+            """),
+            {"user_id": user_id}
+        ).mappings().first()
+
+        sponsor_organizations = db.session.execute(
+            text("""
+                SELECT sponsor_org_id, name
+                FROM sponsor_org
+                WHERE status = 'ACTIVE'
+                ORDER BY name
+            """)
+        ).mappings().all()
+
     return render_template(
         "admin_user_detail.html",
-        user=user
+        user=user,
+        application=application,
+        sponsor_organizations=sponsor_organizations
     )
 
 @app.post("/admin/users/<int:user_id>/points")
@@ -1190,6 +1217,328 @@ def admin_adjust_driver_points(user_id):
 
     flash("Driver points updated successfully.", "success")
     return redirect(url_for("admin_user_detail", user_id=user_id))
+
+
+@app.post("/admin/users/<int:user_id>/status")
+def admin_change_driver_status(user_id):
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    if not valid_csrf_token():
+        return "Invalid form token.", 400
+
+    new_status = request.form.get("status", "")
+
+    if new_status not in ("PENDING", "ACTIVE", "INACTIVE"):
+        return "Invalid account status.", 400
+
+    try:
+        driver = db.session.execute(
+            text("""
+                SELECT status
+                FROM app_user
+                WHERE user_id = :user_id
+                  AND role = 'DRIVER'
+                FOR UPDATE
+            """),
+            {"user_id": user_id}
+        ).mappings().first()
+
+        if driver is None:
+            db.session.rollback()
+            return "Driver not found.", 404
+
+        old_status = driver["status"]
+
+        if new_status == "ACTIVE":
+            profile = db.session.execute(
+                text("""
+                    SELECT user_id
+                    FROM driver_profile
+                    WHERE user_id = :user_id
+                """),
+                {"user_id": user_id}
+            ).first()
+
+            if profile is None:
+                db.session.rollback()
+                flash("Create the Driver's profile before activating the account.", "error")
+                return redirect(url_for("admin_user_detail", user_id=user_id))
+
+        db.session.execute(
+            text("""
+                UPDATE app_user
+                SET status = :status
+                WHERE user_id = :user_id
+                  AND role = 'DRIVER'
+            """),
+            {"status": new_status, "user_id": user_id}
+        )
+
+        write_audit_log(
+            category="ACCOUNT",
+            actor_user_id=session["user_id"],
+            target_user_id=user_id,
+            success=True,
+            detail={
+                "action": "ADMIN_DRIVER_STATUS_CHANGE",
+                "old_status": old_status,
+                "new_status": new_status
+            }
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Admin Driver status change failed")
+        return "Unable to update Driver status.", 500
+
+    flash("Driver status updated successfully.", "success")
+    return redirect(url_for("admin_user_detail", user_id=user_id))
+
+
+@app.post("/admin/users/<int:user_id>/organization")
+def admin_change_driver_org(user_id):
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    if not valid_csrf_token():
+        return "Invalid form token.", 400
+
+    org_value = request.form.get("sponsor_org_id", "").strip()
+
+    if org_value:
+        try:
+            sponsor_org_id = int(org_value)
+        except ValueError:
+            return "Invalid Sponsor Organization.", 400
+
+        if sponsor_org_id <= 0:
+            return "Invalid Sponsor Organization.", 400
+    else:
+        sponsor_org_id = None
+
+    try:
+        driver = db.session.execute(
+            text("""
+                SELECT user_id, status
+                FROM app_user
+                WHERE user_id = :user_id
+                  AND role = 'DRIVER'
+                FOR UPDATE
+            """),
+            {"user_id": user_id}
+        ).mappings().first()
+
+        if driver is None:
+            db.session.rollback()
+            return "Driver not found.", 404
+
+        
+        application = db.session.execute(
+            text("""
+                SELECT application_id, status
+                FROM driver_application
+                WHERE driver_user_id = :user_id
+                ORDER BY created_at DESC, application_id DESC
+                LIMIT 1
+                FOR UPDATE
+            """),
+            {"user_id": user_id}
+        ).mappings().first()
+
+        if application is not None and application["status"] != "APPROVED":
+            db.session.execute(
+                text("""
+                    UPDATE driver_application
+                    SET status = 'APPROVED',
+                        decided_by = :admin_id,
+                        decided_at = CURRENT_TIMESTAMP
+                    WHERE application_id = :application_id
+                """),
+                {
+                    "admin_id": session["user_id"],
+                    "application_id": application["application_id"]
+                }
+            )
+
+        db.session.execute(
+            text("""
+                UPDATE app_user
+                SET status = 'ACTIVE'
+                WHERE user_id = :user_id
+                  AND role = 'DRIVER'
+            """),
+            {"user_id": user_id}
+        )
+
+
+        profile = db.session.execute(
+            text("""
+                SELECT sponsor_org_id, point_balance
+                FROM driver_profile
+                WHERE user_id = :user_id
+                FOR UPDATE
+            """),
+            {"user_id": user_id}
+        ).mappings().first()
+
+        old_org_id = profile["sponsor_org_id"] if profile else None
+
+        if profile is None:
+            db.session.execute(
+                text("""
+                    INSERT INTO driver_profile
+                        (user_id, sponsor_org_id)
+                    VALUES
+                        (:user_id, :sponsor_org_id)
+                """),
+                {
+                    "user_id": user_id,
+                    "sponsor_org_id": sponsor_org_id
+                }
+            )
+        else:
+            db.session.execute(
+                text("""
+                    UPDATE driver_profile
+                    SET sponsor_org_id = :sponsor_org_id
+                    WHERE user_id = :user_id
+                """),
+                {
+                    "user_id": user_id,
+                    "sponsor_org_id": sponsor_org_id
+                }
+            )
+
+        if sponsor_org_id is not None:
+            application = db.session.execute(
+                text("""
+                    SELECT application_id, status
+                    FROM driver_application
+                    WHERE driver_user_id = :user_id
+                    ORDER BY created_at DESC, application_id DESC
+                    LIMIT 1
+                    FOR UPDATE
+                """),
+                {"user_id": user_id}
+            ).mappings().first()
+
+            if application is not None and application["status"] != "APPROVED":
+                db.session.execute(
+                    text("""
+                        UPDATE driver_application
+                        SET status = 'APPROVED',
+                            decided_by = :admin_id,
+                            decided_at = CURRENT_TIMESTAMP
+                        WHERE application_id = :application_id
+                    """),
+                    {
+                        "admin_id": session["user_id"],
+                        "application_id": application["application_id"]
+                    }
+                )
+
+            db.session.execute(
+                text("""
+                    UPDATE app_user
+                    SET status = 'ACTIVE'
+                    WHERE user_id = :user_id
+                      AND role = 'DRIVER'
+                """),
+                {"user_id": user_id}
+            )
+
+        write_audit_log(
+            category="ACCOUNT",
+            actor_user_id=session["user_id"],
+            target_user_id=user_id,
+            sponsor_org_id=sponsor_org_id,
+            success=True,
+            detail={
+                "action": "ADMIN_DRIVER_ORG_CHANGE",
+                "old_sponsor_org_id": old_org_id,
+                "new_sponsor_org_id": sponsor_org_id,
+                "profile_created": profile is None,
+                "account_activated": True            }
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Admin Driver organization change failed")
+        return "Unable to update Sponsor Organization.", 500
+
+    flash("Sponsor Organization updated successfully.", "success")
+    return redirect(url_for("admin_user_detail", user_id=user_id))
+
+
+
+@app.post("/admin/users/<int:user_id>/delete")
+def admin_delete_user(user_id):
+    if session.get("user_id") is None:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "ADMIN":
+        return "Access denied.", 403
+
+    if not valid_csrf_token():
+        return "Invalid form token.", 400
+
+    try:
+        user = db.session.execute(
+            text("""
+                SELECT user_id, role, status
+                FROM app_user
+                WHERE user_id = :user_id
+                  AND role IN ('DRIVER', 'SPONSOR')
+                FOR UPDATE
+            """),
+            {"user_id": user_id}
+        ).mappings().first()
+
+        if user is None:
+            db.session.rollback()
+            return "Driver or Sponsor not found.", 404
+
+        db.session.execute(
+            text("""
+                UPDATE app_user
+                SET status = 'INACTIVE'
+                WHERE user_id = :user_id
+            """),
+            {"user_id": user_id}
+        )
+
+        write_audit_log(
+            category="ACCOUNT",
+            actor_user_id=session["user_id"],
+            target_user_id=user_id,
+            success=True,
+            detail={
+                "action": "ADMIN_ACCOUNT_DEACTIVATION",
+                "role": user["role"],
+                "previous_status": user["status"]
+            }
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Admin account deactivation failed")
+        return "Unable to deactivate account.", 500
+
+    flash("Account deactivated successfully.", "success")
+    return redirect(url_for("admin_user_index"))
 
 
 @app.post("/admin/users/<int:user_id>/impersonate")
