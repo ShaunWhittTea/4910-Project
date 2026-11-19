@@ -2661,6 +2661,59 @@ CATALOG_SORT_ORDERS = {
     "points_desc": "points_price DESC, ci.catalog_item_id ASC",
 }
 
+CATALOG_POINTS_MAX = 2_147_483_647
+
+
+def validate_catalog_points_range(min_points, max_points):
+    """Validate optional inclusive integer bounds."""
+
+    for name, value in (
+        ("minPoints", min_points),
+        ("maxPoints", max_points),
+    ):
+        if value is not None and (
+            type(value) is not int
+            or value < 0
+            or value > CATALOG_POINTS_MAX
+        ):
+            raise ValueError(
+                f"{name} must be a whole number between "
+                f"0 and {CATALOG_POINTS_MAX}."
+            )
+
+    if (
+        min_points is not None
+        and max_points is not None
+        and min_points > max_points
+    ):
+        raise ValueError("minPoints must not exceed maxPoints.")
+
+
+def get_optional_catalog_points(name: str) -> int | None:
+    """Parse a blank/missing bound as unrestricted."""
+
+    raw_value = request.args.get(name, "").strip()
+    if not raw_value:
+        return None
+
+    if (
+        len(raw_value) > 10
+        or not raw_value.isascii()
+        or not raw_value.isdigit()
+    ):
+        raise ValueError(
+            f"{name} must be a whole number between "
+            f"0 and {CATALOG_POINTS_MAX}."
+        )
+
+    value = int(raw_value)
+    if value > CATALOG_POINTS_MAX:
+        raise ValueError(
+            f"{name} must be a whole number between "
+            f"0 and {CATALOG_POINTS_MAX}."
+        )
+
+    return value
 
 def get_driver_catalog_page(
     driver_user_id: int,
@@ -2670,8 +2723,12 @@ def get_driver_catalog_page(
     query: str = "",
     category: str = "",
     sort: str = "default",
+    min_points: int | None = None,
+    max_points: int | None = None,
 ) -> tuple[list[dict], int]:
     """Load a filtered page of the driver's own active sponsor catalog."""
+
+    validate_catalog_points_range(min_points, max_points)
 
     query = query.strip()
     category = category.strip()
@@ -2722,6 +2779,20 @@ def get_driver_catalog_page(
         filters["category"] = category
         scope_sql += """
           AND ci.category = :category
+        """
+
+    if min_points is not None:
+        filters["min_points"] = min_points
+        scope_sql += """
+          AND CEILING(ci.price_usd / so.point_dollar_value)
+              >= :min_points
+        """
+
+    if max_points is not None:
+        filters["max_points"] = max_points
+        scope_sql += """
+          AND CEILING(ci.price_usd / so.point_dollar_value)
+              <= :max_points
         """
 
     total_items = db.session.execute(
@@ -2789,12 +2860,18 @@ def get_catalog_request_options() -> dict:
     if sort not in CATALOG_SORT_ORDERS:
         raise ValueError("Unsupported catalog sort option.")
 
+    min_points = get_optional_catalog_points("minPoints")
+    max_points = get_optional_catalog_points("maxPoints")
+    validate_catalog_points_range(min_points, max_points)
+
     return {
         "page": page,
         "page_size": page_size,
         "query": query,
         "category": category,
         "sort": sort,
+        "min_points": min_points,
+        "max_points": max_points,
     }
 
 
@@ -2859,6 +2936,8 @@ def driver_catalog():
                     q=options["query"],
                     category=options["category"],
                     sort=options["sort"],
+                    minPoints=options["min_points"],
+                    maxPoints=options["max_points"],
                 )
             )
 
@@ -2880,6 +2959,8 @@ def driver_catalog():
         selected_category=options["category"],
         selected_sort=options["sort"],
         categories=categories,
+        min_points=options["min_points"],
+        max_points=options["max_points"],
     )
 
 

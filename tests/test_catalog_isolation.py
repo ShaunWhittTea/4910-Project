@@ -297,5 +297,216 @@ class CatalogIsolationTests(unittest.TestCase):
                             **options,
                         )
 
+    def test_filtered_empty_catalog_shows_no_matches_and_controls(self):
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        response = self.client.get(
+            "/driver/catalog",
+            query_string={"q": "zzznomatch987"},
+        )
+
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("No matching rewards", body)
+        self.assertNotIn("No rewards are available yet", body)
+        self.assertIn('name="q"', body)
+        self.assertIn('name="category"', body)
+        self.assertIn("Clear filters", body)
+
+    def test_unfiltered_empty_catalog_shows_catalog_empty_state(self):
+        self.database_session.execute(
+            text("""
+                UPDATE catalog_item
+                SET active = 0
+                WHERE sponsor_org_id = 1
+            """)
+        )
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        response = self.client.get("/driver/catalog")
+
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("No rewards are available yet", body)
+        self.assertNotIn("No matching rewards", body)
+
+    def test_category_choices_exclude_other_sponsors_and_inactive_items(self):
+        self.database_session.execute(
+            text("""
+                UPDATE catalog_item
+                SET category = CASE catalog_item_id
+                    WHEN 1 THEN 'Electronics'
+                    WHEN 2 THEN 'Drinkware'
+                    WHEN 3 THEN 'Inactive Only'
+                    WHEN 4 THEN 'Other Sponsor Only'
+                END
+            """)
+        )
+
+        with catalog_app.app.app_context():
+            categories = catalog_app.get_driver_catalog_categories(101)
+
+        self.assertEqual(categories, ["Drinkware", "Electronics"])
+
+    def test_category_choices_exclude_missing_and_blank_values(self):
+        for blank_value in (None, "", "   "):
+            with self.subTest(category=blank_value):
+                self.database_session.execute(
+                    text("""
+                        UPDATE catalog_item
+                        SET category = :category
+                        WHERE sponsor_org_id = 1
+                    """),
+                    {"category": blank_value},
+                )
+
+                with catalog_app.app.app_context():
+                    categories = (
+                        catalog_app.get_driver_catalog_categories(101)
+                    )
+
+                self.assertEqual(categories, [])
+
+    def test_html_category_filter_displays_only_matching_sponsor_items(self):
+        self.database_session.execute(
+            text("""
+                UPDATE catalog_item
+                SET category = CASE catalog_item_id
+                    WHEN 1 THEN 'Electronics'
+                    WHEN 2 THEN 'Drinkware'
+                    WHEN 3 THEN 'Electronics'
+                    WHEN 4 THEN 'Electronics'
+                END
+            """)
+        )
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        response = self.client.get(
+            "/driver/catalog",
+            query_string={
+                "category": "Electronics",
+                "sort": "name_asc",
+            },
+        )
+
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Sponsor A Item 1", body)
+        self.assertNotIn("Sponsor A Item 2", body)
+        self.assertNotIn("Inactive A Item", body)
+        self.assertNotIn("Sponsor B Item", body)
+        self.assertIn("Electronics", body)
+        self.assertIn("Drinkware", body)
+
+    def test_points_ranges_are_inclusive_and_sponsor_scoped(self):
+        cases = [
+            ({}, [1, 2]),
+            ({"minPoints": 1000, "maxPoints": 1000}, [1]),
+            ({"minPoints": 1001}, [2]),
+            ({"maxPoints": 1000}, [1]),
+            ({"minPoints": 0, "maxPoints": 0}, []),
+            ({"minPoints": 500, "maxPoints": 900}, []),
+        ]
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        for bounds, expected_ids in cases:
+            with self.subTest(bounds=bounds):
+                response = self.client.get(
+                    "/api/catalog/items",
+                    query_string=bounds,
+                )
+
+                self.assertEqual(response.status_code, 200)
+                body = response.get_json()
+                self.assertEqual(
+                    [
+                        item["catalog_item_id"]
+                        for item in body["items"]
+                    ],
+                    expected_ids,
+                )
+                self.assertEqual(
+                    body["pagination"]["totalItems"],
+                    len(expected_ids),
+                )
+
+    def test_points_range_uses_the_drivers_sponsor_conversion(self):
+        self.sign_in(user_id=202, fake_sponsor_id=1)
+
+        response = self.client.get(
+            "/api/catalog/items",
+            query_string={"minPoints": 750, "maxPoints": 750},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [
+                item["catalog_item_id"]
+                for item in response.get_json()["items"]
+            ],
+            [4],
+        )
+
+    def test_invalid_points_ranges_return_400_on_both_routes(self):
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+        cases = [
+            {"minPoints": "-1"},
+            {"maxPoints": "1.5"},
+            {"minPoints": "abc"},
+            {"maxPoints": "2147483648"},
+            {"minPoints": "2000", "maxPoints": "1000"},
+        ]
+
+        for route in ("/api/catalog/items", "/driver/catalog"):
+            for bounds in cases:
+                with self.subTest(route=route, bounds=bounds):
+                    response = self.client.get(
+                        route,
+                        query_string=bounds,
+                    )
+                    self.assertEqual(response.status_code, 400)
+
+    def test_points_range_combines_with_existing_controls(self):
+        self.database_session.execute(
+            text("""
+                UPDATE catalog_item
+                SET category = 'Equipment'
+            """)
+        )
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        response = self.client.get(
+            "/api/catalog/items",
+            query_string={
+                "q": "Sponsor",
+                "category": "Equipment",
+                "sort": "points_desc",
+                "minPoints": 1000,
+                "maxPoints": 2000,
+                "pageSize": 1,
+                "page": 2,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["pagination"]["totalItems"], 2)
+        self.assertEqual(body["pagination"]["totalPages"], 2)
+        self.assertEqual(body["items"][0]["catalog_item_id"], 1)
+
+    def test_points_only_empty_search_shows_no_matching_rewards(self):
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        response = self.client.get(
+            "/driver/catalog",
+            query_string={"maxPoints": 0},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "No matching rewards",
+            response.get_data(as_text=True),
+        )
+
 if __name__ == "__main__":
     unittest.main()

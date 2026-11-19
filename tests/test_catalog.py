@@ -150,6 +150,8 @@ class CatalogTests(unittest.TestCase):
             query="thermos",
             category="Drinkware",
             sort="points_asc",
+            min_points=None,
+            max_points=None
         )
 
     def test_invalid_catalog_controls_do_not_query_products(self):
