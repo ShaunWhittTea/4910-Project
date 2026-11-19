@@ -48,6 +48,96 @@
             </p>
         </header>
 
+        <form method="get" action="{{ url_for('driver_catalog') }}">
+    <div>
+        <label for="catalog-query">Keyword</label>
+        <input
+            id="catalog-query"
+            type="search"
+            name="q"
+            value="{{ query }}"
+            maxlength="100"
+            placeholder="Search titles and descriptions"
+        >
+    </div>
+
+    <div>
+        <label for="catalog-category">Category</label>
+        <select id="catalog-category" name="category">
+            <option value="">All categories</option>
+
+            {% if selected_category
+                  and selected_category not in categories %}
+                <option value="{{ selected_category }}" selected>
+                    {{ selected_category }} (no active matches)
+                </option>
+            {% endif %}
+
+            {% for category_name in categories %}
+                <option
+                    value="{{ category_name }}"
+                    {% if selected_category == category_name %}selected{% endif %}
+                >
+                    {{ category_name }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div>
+        <label for="catalog-sort">Sort</label>
+        <select id="catalog-sort" name="sort">
+            {% for value, label in [
+                ('default', 'Default order'),
+                ('name_asc', 'Name: A–Z'),
+                ('name_desc', 'Name: Z–A'),
+                ('points_asc', 'Points: low to high'),
+                ('points_desc', 'Points: high to low')
+            ] %}
+                <option
+                    value="{{ value }}"
+                    {% if selected_sort == value %}selected{% endif %}
+                >
+                    {{ label }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <input type="hidden" name="pageSize" value="{{ page_size }}">
+    
+    <div>
+        <label for="catalog-min-points">Minimum points</label>
+        <input
+            id="catalog-min-points"
+            type="number"
+            name="minPoints"
+            min="0"
+            max="2147483647"
+            step="1"
+            value="{{ min_points if min_points is not none else '' }}"
+        >
+    </div>
+
+    <div>
+        <label for="catalog-max-points">Maximum points</label>
+        <input
+            id="catalog-max-points"
+            type="number"
+            name="maxPoints"
+            min="0"
+            max="2147483647"
+            step="1"
+            value="{{ max_points if max_points is not none else '' }}"
+        >
+    </div>
+
+    <button type="submit">Apply</button>
+    <a href="{{ url_for('driver_catalog', pageSize=page_size) }}">
+        Clear filters
+    </a>
+</form>
+        
         {% if catalog_items %}
             <section class="catalog-grid" aria-label="Catalog products">
                 {% for item in catalog_items %}
@@ -109,7 +199,16 @@
                 {% if page > 1 %}
                     <a
                         class="page-button"
-                        href="{{ url_for('driver_catalog', page=page - 1, pageSize=page_size) }}"
+                        href="{{ url_for(
+                                'driver_catalog',
+                                page=page - 1,
+                                pageSize=page_size,
+                                q=query,
+                                category=selected_category,
+                                sort=selected_sort,
+                                minPoints=min_points,
+                                maxPoints=max_points
+                            ) }}"
                     >
                         Previous
                     </a>
@@ -126,7 +225,16 @@
                 {% if page < total_pages %}
                     <a
                         class="page-button"
-                        href="{{ url_for('driver_catalog', page=page + 1, pageSize=page_size) }}"
+                        href="{{ url_for(
+                                    'driver_catalog',
+                                    page=page + 1,
+                                    pageSize=page_size,
+                                    q=query,
+                                    category=selected_category,
+                                    sort=selected_sort,
+                                    minPoints=min_points,
+                                    maxPoints=max_points
+                            ) }}"
                     >
                         Next
                     </a>
@@ -138,10 +246,13 @@
             </nav>
         {% else %}
             <section class="catalog-empty">
-                <h2>No rewards are available yet</h2>
-                <p>
-                    Your sponsor does not currently have active catalog items.
-                </p>
+                {% if query or selected_category or min_points is not none or max_points is not none %}
+                    <h2>No matching rewards</h2>
+                    <p>Try another keyword, category, or points range, or clear the filters.</p>
+                {% else %}
+                    <h2>No rewards are available yet</h2>
+                    <p>Your sponsor does not currently have active catalog items.</p>
+                {% endif %}
             </section>
         {% endif %}
     </main>
