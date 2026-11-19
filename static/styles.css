@@ -1235,6 +1235,23 @@ body {
     background: #f3f4f6;
 }
 
+.notification-card {
+    margin: 16px 0;
+    padding: 18px;
+    background: white;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+}
+
+.notification-card h2,
+.notification-card h3 {
+    margin-top: 0;
+}
+
+.container select[multiple] {
+    min-height: 120px;
+}
+
 @media (max-width: 600px) {
     .impersonation-banner {
         flex-direction: column;

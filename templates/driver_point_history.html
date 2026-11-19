@@ -32,6 +32,7 @@
                         <th scope="col">Date</th>
                         <th scope="col">Reason</th>
                         <th scope="col">Sponsor</th>
+                        <th scope="col">Balance After Change</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -59,6 +60,7 @@
                             </td>
                             <td class="point-reason">{{ change['reason'] }}</td>
                             <td>{{ change['sponsor_name'] }}</td>
+                            <td>{{ change['resulting_balance'] }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Driver Alerts</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+{% include 'impersonation_banner.html' %}
+<main class="container">
+    <a class="back-link" href="{{ url_for('driver_dashboard') }}">Back to Dashboard</a>
+    <h1>Alerts</h1>
+
+    {% with flashed_messages = get_flashed_messages(with_categories=true) %}
+        {% for category, flashed_message in flashed_messages %}
+            <p class="message{% if category == 'error' %} message-error{% endif %}" role="status">{{ flashed_message }}</p>
+        {% endfor %}
+    {% endwith %}
+
+    <h2>Alert Preferences</h2>
+    <form method="POST">
+        <label>
+            <input type="checkbox" name="point_alerts_enabled"
+                   {% if preferences and preferences['point_alerts_enabled'] %}checked{% endif %}>
+            Alert me when my points change
+        </label>
+        <label>
+            <input type="checkbox" name="order_alerts_enabled"
+                   {% if preferences and preferences['order_alerts_enabled'] %}checked{% endif %}>
+            Send me an order summary after a purchase
+        </label>
+        <button type="submit">Save Alert Preferences</button>
+    </form>
+
+    <h2>My Alerts</h2>
+    {% if notifications %}
+        {% for notification in notifications %}
+            <article class="notification-card">
+                <h3>{{ notification['title'] }}</h3>
+                <p>{{ notification['message'] }}</p>
+                {% if notification['sponsor_name'] %}<p><strong>Sponsor:</strong> {{ notification['sponsor_name'] }}</p>{% endif %}
+                <p><time datetime="{{ notification['created_at'].isoformat() }}">{{ notification['created_at'].strftime('%b %d, %Y at %I:%M %p') }}</time></p>
+            </article>
+        {% endfor %}
+    {% else %}
+        <p>No alerts yet.</p>
+    {% endif %}
+</main>
+</body>
+</html>

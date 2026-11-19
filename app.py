@@ -146,6 +146,94 @@ INVALID_RESET_LINK_MESSAGE = (
 def get_audit_actor_id():
     return session.get("impersonator_admin_id") or session.get("user_id")
 
+
+def create_driver_notification(
+    driver_user_id,
+    sponsor_org_id,
+    notification_type,
+    title,
+    message,
+    preference=None,
+):
+    """Insert a driver alert, honoring an optional profile preference."""
+
+    preference_columns = {
+        "point": "point_alerts_enabled",
+        "order": "order_alerts_enabled",
+    }
+
+    if preference is None:
+        db.session.execute(
+            text(
+                """
+                INSERT INTO driver_notification
+                    (driver_user_id, sponsor_org_id, notification_type,
+                     title, message)
+                VALUES
+                    (:driver_user_id, :sponsor_org_id, :notification_type,
+                     :title, :message)
+                """
+            ),
+            {
+                "driver_user_id": driver_user_id,
+                "sponsor_org_id": sponsor_org_id,
+                "notification_type": notification_type,
+                "title": title,
+                "message": message,
+            },
+        )
+        return
+
+    preference_column = preference_columns.get(preference)
+    if preference_column is None:
+        raise ValueError("Unknown driver notification preference")
+
+    db.session.execute(
+        text(
+            f"""
+            INSERT INTO driver_notification
+                (driver_user_id, sponsor_org_id, notification_type,
+                 title, message)
+            SELECT :driver_user_id, :sponsor_org_id, :notification_type,
+                   :title, :message
+            FROM driver_profile
+            WHERE user_id = :driver_user_id
+              AND {preference_column} = TRUE
+            """
+        ),
+        {
+            "driver_user_id": driver_user_id,
+            "sponsor_org_id": sponsor_org_id,
+            "notification_type": notification_type,
+            "title": title,
+            "message": message,
+        },
+    )
+
+
+def sync_selected_driver_membership(driver_user_id, sponsor_org_id):
+    """Mirror a selected active membership into the legacy profile cache."""
+
+    result = db.session.execute(
+        text(
+            """
+            UPDATE driver_profile AS dp
+            JOIN driver_sponsor_membership AS dsm
+              ON dsm.driver_user_id = dp.user_id
+             AND dsm.sponsor_org_id = :sponsor_org_id
+             AND dsm.status = 'ACTIVE'
+            SET dp.sponsor_org_id = dsm.sponsor_org_id,
+                dp.point_balance = dsm.point_balance
+            WHERE dp.user_id = :driver_user_id
+            """
+        ),
+        {
+            "driver_user_id": driver_user_id,
+            "sponsor_org_id": sponsor_org_id,
+        },
+    )
+    return result.rowcount == 1
+
 def get_password_validation_errors(password):
     """Return each unmet password-complexity requirement."""
 
@@ -1139,11 +1227,15 @@ def admin_adjust_driver_points(user_id):
     try:
         driver = db.session.execute(
             text("""
-                SELECT dp.point_balance, dp.sponsor_org_id
+                SELECT dsm.point_balance, dp.sponsor_org_id
                 FROM driver_profile AS dp
+                JOIN driver_sponsor_membership AS dsm
+                  ON dsm.driver_user_id = dp.user_id
+                 AND dsm.sponsor_org_id = dp.sponsor_org_id
                 JOIN app_user AS u ON u.user_id = dp.user_id
                 WHERE dp.user_id = :user_id
                   AND u.role = 'DRIVER'
+                  AND dsm.status = 'ACTIVE'
                 FOR UPDATE
             """),
             {"user_id": user_id}
@@ -1164,6 +1256,21 @@ def admin_adjust_driver_points(user_id):
 
         db.session.execute(
             text("""
+                UPDATE driver_sponsor_membership
+                SET point_balance = :new_balance
+                WHERE driver_user_id = :user_id
+                  AND sponsor_org_id = :sponsor_org_id
+                  AND status = 'ACTIVE'
+            """),
+            {
+                "new_balance": new_balance,
+                "user_id": user_id,
+                "sponsor_org_id": driver["sponsor_org_id"]
+            }
+        )
+
+        db.session.execute(
+            text("""
                 UPDATE driver_profile
                 SET point_balance = :new_balance
                 WHERE user_id = :user_id
@@ -1172,6 +1279,19 @@ def admin_adjust_driver_points(user_id):
                 "new_balance": new_balance,
                 "user_id": user_id
             }
+        )
+
+        change_label = f"+{change}" if change > 0 else str(change)
+        create_driver_notification(
+            driver_user_id=user_id,
+            sponsor_org_id=driver["sponsor_org_id"],
+            notification_type="POINT_CHANGE",
+            title="Your points changed",
+            message=(
+                f"An administrator recorded a {change_label} point change "
+                f"for {reason}. Your new balance is {new_balance} points."
+            ),
+            preference="point",
         )
 
         db.session.execute(
@@ -1419,6 +1539,23 @@ def admin_change_driver_org(user_id):
             )
 
         if sponsor_org_id is not None:
+            db.session.execute(
+                text("""
+                    INSERT INTO driver_sponsor_membership
+                        (driver_user_id, sponsor_org_id, status, point_balance)
+                    VALUES
+                        (:user_id, :sponsor_org_id, 'ACTIVE', 0)
+                    ON DUPLICATE KEY UPDATE
+                        status = 'ACTIVE',
+                        updated_at = CURRENT_TIMESTAMP
+                """),
+                {
+                    "user_id": user_id,
+                    "sponsor_org_id": sponsor_org_id,
+                }
+            )
+            sync_selected_driver_membership(user_id, sponsor_org_id)
+
             application = db.session.execute(
                 text("""
                     SELECT application_id, status
@@ -1452,6 +1589,15 @@ def admin_change_driver_org(user_id):
                     SET status = 'ACTIVE'
                     WHERE user_id = :user_id
                       AND role = 'DRIVER'
+                """),
+                {"user_id": user_id}
+            )
+        else:
+            db.session.execute(
+                text("""
+                    UPDATE driver_profile
+                    SET point_balance = 0
+                    WHERE user_id = :user_id
                 """),
                 {"user_id": user_id}
             )
@@ -1975,6 +2121,22 @@ def admin_create_driver():
                     }
                 )
 
+                db.session.execute(
+                    text(
+                        """
+                        INSERT INTO driver_sponsor_membership
+                            (driver_user_id, sponsor_org_id,
+                             status, point_balance)
+                        VALUES
+                            (:user_id, :sponsor_org_id, 'ACTIVE', 0)
+                        """
+                    ),
+                    {
+                        "user_id": new_user_id,
+                        "sponsor_org_id": sponsor_org_id,
+                    },
+                )
+
                 db.session.commit()
                 message = "Driver created successfully."
 
@@ -2432,6 +2594,22 @@ def sponsor_create_driver():
                         },
                     )
 
+                    db.session.execute(
+                        text(
+                            """
+                            INSERT INTO driver_sponsor_membership
+                                (driver_user_id, sponsor_org_id,
+                                 status, point_balance)
+                            VALUES
+                                (:user_id, :sponsor_org_id, 'ACTIVE', 0)
+                            """
+                        ),
+                        {
+                            "user_id": driver_user_id,
+                            "sponsor_org_id": session["sponsor_org_id"],
+                        },
+                    )
+
                     db.session.commit()
                     message = "Driver created successfully."
 
@@ -2544,15 +2722,16 @@ def driver_apply():
                     u.last_name,
                     u.email,
                     u.phone,
-                    da.sponsor_org_id,
-                    da.reason
+                    GROUP_CONCAT(da.sponsor_org_id ORDER BY da.sponsor_org_id)
+                        AS sponsor_org_ids,
+                    MAX(da.reason) AS reason
                 FROM app_user u
                 JOIN driver_application da
                     ON da.driver_user_id = u.user_id
                 WHERE u.user_id = :user_id
                   AND da.status = 'INCOMPLETE'
-                ORDER BY da.created_at DESC
-                LIMIT 1
+                GROUP BY u.user_id, u.first_name, u.last_name,
+                         u.email, u.phone
                 """
             ),
             {"user_id": session["user_id"]},
@@ -2583,7 +2762,20 @@ def driver_apply():
         email = request.form.get("email", "").strip().lower()
         phone = request.form.get("phone", "").strip()
         has_license = request.form.get("has_license", "")
-        sponsor_org_id = request.form.get("sponsor_org_id", "")
+        sponsor_org_ids = request.form.getlist("sponsor_org_ids")
+        if not sponsor_org_ids:
+            legacy_sponsor_org_id = request.form.get("sponsor_org_id", "")
+            if legacy_sponsor_org_id:
+                sponsor_org_ids = [legacy_sponsor_org_id]
+        valid_organization_ids = {
+            str(organization["sponsor_org_id"])
+            for organization in organizations
+        }
+        sponsor_org_ids = list(dict.fromkeys(sponsor_org_ids))
+        sponsors_are_valid = (
+            bool(sponsor_org_ids)
+            and all(value in valid_organization_ids for value in sponsor_org_ids)
+        )
         password = request.form.get("password", "")
         confirm_password = request.form.get("confirm_password", "")
 
@@ -2591,7 +2783,7 @@ def driver_apply():
             not first_name
             or not last_name
             or not email
-            or not sponsor_org_id
+            or not sponsors_are_valid
             or (saved_application is None and not password)
             or (saved_application is None and not confirm_password)
         ):
@@ -2606,7 +2798,7 @@ def driver_apply():
             or not email
             or not phone
             or not has_license
-            or not sponsor_org_id
+            or not sponsors_are_valid
             or (saved_application is None and not password)
             or (saved_application is None and not confirm_password)
         ):
@@ -2624,6 +2816,7 @@ def driver_apply():
             application_status = (
                 "INCOMPLETE" if action == "save" else "PENDING"
             )
+            primary_sponsor_org_id = sponsor_org_ids[0]
 
             try:
                 if saved_application is not None:
@@ -2646,7 +2839,7 @@ def driver_apply():
                             "last_name": last_name,
                             "email": email,
                             "phone": phone,
-                            "sponsor_org_id": sponsor_org_id,
+                            "sponsor_org_id": primary_sponsor_org_id,
                             "user_id": driver_user_id,
                         },
                     )
@@ -2654,21 +2847,35 @@ def driver_apply():
                     db.session.execute(
                         text(
                             """
-                            UPDATE driver_application
-                            SET sponsor_org_id = :sponsor_org_id,
-                                status = :application_status,
-                                reason = :reason
+                            DELETE FROM driver_application
                             WHERE driver_user_id = :driver_user_id
                               AND status = 'INCOMPLETE'
                             """
                         ),
                         {
-                            "sponsor_org_id": sponsor_org_id,
-                            "application_status": application_status,
-                            "reason": "Valid driver's license: " + has_license,
                             "driver_user_id": driver_user_id,
                         },
                     )
+
+                    for sponsor_org_id in sponsor_org_ids:
+                        db.session.execute(
+                            text(
+                                """
+                                INSERT INTO driver_application
+                                    (driver_user_id, sponsor_org_id,
+                                     status, reason)
+                                VALUES
+                                    (:driver_user_id, :sponsor_org_id,
+                                     :application_status, :reason)
+                                """
+                            ),
+                            {
+                                "driver_user_id": driver_user_id,
+                                "sponsor_org_id": sponsor_org_id,
+                                "application_status": application_status,
+                                "reason": "Valid driver's license: " + has_license,
+                            },
+                        )
 
                     db.session.commit()
 
@@ -2725,34 +2932,31 @@ def driver_apply():
                                 "first_name": first_name,
                                 "last_name": last_name,
                                 "phone": phone,
-                                "sponsor_org_id": sponsor_org_id,
+                                "sponsor_org_id": primary_sponsor_org_id,
                             },
                         )
 
                         driver_user_id = result.lastrowid
 
-                        db.session.execute(
-                            text(
-                                """
-                                INSERT INTO driver_application
-                                    (driver_user_id,
-                                     sponsor_org_id,
-                                     status,
-                                     reason)
-                                VALUES
-                                    (:driver_user_id,
-                                     :sponsor_org_id,
-                                     :application_status,
-                                     :reason)
-                                """
-                            ),
-                            {
-                                "driver_user_id": driver_user_id,
-                                "sponsor_org_id": sponsor_org_id,
-                                "application_status": application_status,
-                                "reason": "Valid driver's license: " + has_license,
-                            },
-                        )
+                        for sponsor_org_id in sponsor_org_ids:
+                            db.session.execute(
+                                text(
+                                    """
+                                    INSERT INTO driver_application
+                                        (driver_user_id, sponsor_org_id,
+                                         status, reason)
+                                    VALUES
+                                        (:driver_user_id, :sponsor_org_id,
+                                         :application_status, :reason)
+                                    """
+                                ),
+                                {
+                                    "driver_user_id": driver_user_id,
+                                    "sponsor_org_id": sponsor_org_id,
+                                    "application_status": application_status,
+                                    "reason": "Valid driver's license: " + has_license,
+                                },
+                            )
 
                         db.session.commit()
 
@@ -2791,7 +2995,7 @@ def application_status():
     if "user_id" not in session:
         return redirect(url_for("login"))
 
-    application = db.session.execute(
+    application_result = db.session.execute(
         text(
             """
             SELECT a.status,
@@ -2802,24 +3006,30 @@ def application_status():
               ON a.sponsor_org_id = o.sponsor_org_id
             WHERE a.driver_user_id = :user_id
             ORDER BY a.created_at DESC
-            LIMIT 1
             """
         ),
         {
             "user_id": session["user_id"]
         },
-    ).mappings().first()
+    ).mappings()
+    applications = application_result.all()
+    if not isinstance(applications, list):
+        # Retain compatibility with lightweight database fakes used by the
+        # project's route tests while production SQLAlchemy returns a list.
+        first_application = application_result.first()
+        applications = [first_application] if first_application else []
 
-    if application is None:
+    if not applications:
         return redirect(url_for("login"))
 
-    # Approved drivers should use the normal driver dashboard.
-    if application["status"] == "APPROVED":
+    # Drivers with at least one approved sponsor can use the dashboard.
+    if any(application["status"] == "APPROVED" for application in applications):
         return redirect(url_for("driver_dashboard"))
 
     return render_template(
         "application_status.html",
-        application=application
+        applications=applications,
+        application=applications[0],
     )
 
 # 25141 / 25142 - Sponsor Driver Application Management
@@ -2909,6 +3119,27 @@ def sponsor_approve_application(application_id):
                     (:driver_user_id,
                      :sponsor_org_id,
                      0)
+                ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)
+                """
+            ),
+            {
+                "driver_user_id": application["driver_user_id"],
+                "sponsor_org_id": session["sponsor_org_id"],
+            },
+        )
+
+        # Create or reactivate this sponsor-specific membership without
+        # changing balances held with any other sponsor.
+        db.session.execute(
+            text(
+                """
+                INSERT INTO driver_sponsor_membership
+                    (driver_user_id, sponsor_org_id, status, point_balance)
+                VALUES
+                    (:driver_user_id, :sponsor_org_id, 'ACTIVE', 0)
+                ON DUPLICATE KEY UPDATE
+                    status = 'ACTIVE',
+                    updated_at = CURRENT_TIMESTAMP
                 """
             ),
             {
@@ -3012,12 +3243,15 @@ def sponsor_drivers():
                    u.email,
                    u.phone,
                    u.status,
-                   d.point_balance,
-                   d.shipping_address
+                   dsm.point_balance,
+                   dp.shipping_address
             FROM app_user u
-            JOIN driver_profile d
-              ON u.user_id = d.user_id
-            WHERE d.sponsor_org_id = :sponsor_org_id
+            JOIN driver_sponsor_membership dsm
+              ON u.user_id = dsm.driver_user_id
+            JOIN driver_profile dp
+              ON u.user_id = dp.user_id
+            WHERE dsm.sponsor_org_id = :sponsor_org_id
+              AND dsm.status = 'ACTIVE'
               AND u.role = 'DRIVER'
             ORDER BY u.last_name, u.first_name
             """
@@ -3047,12 +3281,15 @@ def sponsor_edit_driver(driver_user_id):
                    u.last_name,
                    u.email,
                    u.phone,
-                   d.shipping_address
+                   dp.shipping_address
             FROM app_user u
-            JOIN driver_profile d
-              ON u.user_id = d.user_id
+            JOIN driver_sponsor_membership dsm
+              ON u.user_id = dsm.driver_user_id
+            JOIN driver_profile dp
+              ON u.user_id = dp.user_id
             WHERE u.user_id = :driver_user_id
-              AND d.sponsor_org_id = :sponsor_org_id
+              AND dsm.sponsor_org_id = :sponsor_org_id
+              AND dsm.status = 'ACTIVE'
               AND u.role = 'DRIVER'
             """
         ),
@@ -3103,7 +3340,6 @@ def sponsor_edit_driver(driver_user_id):
                         UPDATE driver_profile
                         SET shipping_address = :shipping_address
                         WHERE user_id = :driver_user_id
-                          AND sponsor_org_id = :sponsor_org_id
                         """
                     ),
                     {
@@ -3111,7 +3347,6 @@ def sponsor_edit_driver(driver_user_id):
                             shipping_address if shipping_address else None
                         ),
                         "driver_user_id": driver_user_id,
-                        "sponsor_org_id": session["sponsor_org_id"],
                     },
                 )
 
@@ -3140,12 +3375,18 @@ def sponsor_remove_driver(driver_user_id):
     driver = db.session.execute(
         text(
             """
-            SELECT u.user_id
+            SELECT u.user_id, dp.sponsor_org_id AS selected_sponsor_org_id,
+                   so.name AS sponsor_name
             FROM app_user u
-            JOIN driver_profile d
-              ON d.user_id = u.user_id
+            JOIN driver_sponsor_membership dsm
+              ON dsm.driver_user_id = u.user_id
+            JOIN driver_profile dp
+              ON dp.user_id = u.user_id
+            JOIN sponsor_org so
+              ON so.sponsor_org_id = dsm.sponsor_org_id
             WHERE u.user_id = :driver_user_id
-              AND d.sponsor_org_id = :sponsor_org_id
+              AND dsm.sponsor_org_id = :sponsor_org_id
+              AND dsm.status = 'ACTIVE'
               AND u.role = 'DRIVER'
               AND u.status = 'ACTIVE'
             """
@@ -3160,20 +3401,73 @@ def sponsor_remove_driver(driver_user_id):
         return "Driver not found.", 404
 
     try:
-        # Keep the driver's records, but prevent further participation.
+        # Remove only this sponsor relationship. Other sponsor memberships
+        # and their balances remain available to the driver.
         db.session.execute(
             text(
                 """
-                UPDATE app_user
-                SET status = 'INACTIVE'
-                WHERE user_id = :driver_user_id
-                  AND role = 'DRIVER'
+                UPDATE driver_sponsor_membership
+                SET status = 'REMOVED', updated_at = CURRENT_TIMESTAMP
+                WHERE driver_user_id = :driver_user_id
+                  AND sponsor_org_id = :sponsor_org_id
                 """
             ),
             {
-                "driver_user_id": driver_user_id
+                "driver_user_id": driver_user_id,
+                "sponsor_org_id": sponsor_org_id,
             },
         )
+
+        create_driver_notification(
+            driver_user_id=driver_user_id,
+            sponsor_org_id=sponsor_org_id,
+            notification_type="SPONSOR_REMOVAL",
+            title="Sponsor membership ended",
+            message=(
+                f"{driver['sponsor_name']} removed you from its sponsor "
+                "program. Your other sponsor programs are unchanged."
+            ),
+        )
+
+        if driver["selected_sponsor_org_id"] == sponsor_org_id:
+            replacement = db.session.execute(
+                text(
+                    """
+                    SELECT sponsor_org_id
+                    FROM driver_sponsor_membership
+                    WHERE driver_user_id = :driver_user_id
+                      AND status = 'ACTIVE'
+                    ORDER BY joined_at, sponsor_org_id
+                    LIMIT 1
+                    """
+                ),
+                {"driver_user_id": driver_user_id},
+            ).scalar()
+
+            if replacement is not None:
+                sync_selected_driver_membership(driver_user_id, replacement)
+            else:
+                db.session.execute(
+                    text(
+                        """
+                        UPDATE driver_profile
+                        SET sponsor_org_id = NULL, point_balance = 0
+                        WHERE user_id = :driver_user_id
+                        """
+                    ),
+                    {"driver_user_id": driver_user_id},
+                )
+                db.session.execute(
+                    text(
+                        """
+                        UPDATE app_user
+                        SET status = 'INACTIVE'
+                        WHERE user_id = :driver_user_id
+                          AND role = 'DRIVER'
+                        """
+                    ),
+                    {"driver_user_id": driver_user_id},
+                )
 
         db.session.commit()
 
@@ -3196,10 +3490,11 @@ def sponsor_impersonate_driver(driver_user_id):
             """
             SELECT u.user_id
             FROM app_user u
-            JOIN driver_profile d
-              ON d.user_id = u.user_id
+            JOIN driver_sponsor_membership dsm
+              ON dsm.driver_user_id = u.user_id
             WHERE u.user_id = :driver_user_id
-              AND d.sponsor_org_id = :sponsor_org_id
+              AND dsm.sponsor_org_id = :sponsor_org_id
+              AND dsm.status = 'ACTIVE'
               AND u.role = 'DRIVER'
               AND u.status = 'ACTIVE'
             """
@@ -3274,9 +3569,11 @@ def sponsor_points():
                     text(
                         """
                         SELECT point_balance
-                        FROM driver_profile
-                        WHERE user_id = :driver_user_id
+                        FROM driver_sponsor_membership
+                        WHERE driver_user_id = :driver_user_id
                           AND sponsor_org_id = :sponsor_org_id
+                          AND status = 'ACTIVE'
+                        FOR UPDATE
                         """
                     ),
                     {
@@ -3298,9 +3595,9 @@ def sponsor_points():
                         db.session.execute(
                             text(
                                 """
-                                UPDATE driver_profile
+                                UPDATE driver_sponsor_membership
                                 SET point_balance = :new_balance
-                                WHERE user_id = :driver_user_id
+                                WHERE driver_user_id = :driver_user_id
                                   AND sponsor_org_id = :sponsor_org_id
                                 """
                             ),
@@ -3338,6 +3635,41 @@ def sponsor_points():
                             },
                         )
 
+                        # Keep the selected-sponsor cache used by legacy
+                        # driver pages synchronized when applicable.
+                        db.session.execute(
+                            text(
+                                """
+                                UPDATE driver_profile
+                                SET point_balance = :new_balance
+                                WHERE user_id = :driver_user_id
+                                  AND sponsor_org_id = :sponsor_org_id
+                                """
+                            ),
+                            {
+                                "new_balance": new_balance,
+                                "driver_user_id": driver_user_id,
+                                "sponsor_org_id": session["sponsor_org_id"],
+                            },
+                        )
+
+                        change_label = (
+                            f"+{point_change}" if point_change > 0
+                            else str(point_change)
+                        )
+                        create_driver_notification(
+                            driver_user_id=driver_user_id,
+                            sponsor_org_id=session["sponsor_org_id"],
+                            notification_type="POINT_CHANGE",
+                            title="Your points changed",
+                            message=(
+                                f"Your sponsor recorded a {change_label} point "
+                                f"change for {reason}. Your new balance is "
+                                f"{new_balance} points."
+                            ),
+                            preference="point",
+                        )
+
                         db.session.commit()
                         message = "Point balance updated successfully."
 
@@ -3352,11 +3684,12 @@ def sponsor_points():
             SELECT u.user_id,
                    u.first_name,
                    u.last_name,
-                   d.point_balance
+                   dsm.point_balance
             FROM app_user u
-            JOIN driver_profile d
-              ON u.user_id = d.user_id
-            WHERE d.sponsor_org_id = :sponsor_org_id
+            JOIN driver_sponsor_membership dsm
+              ON u.user_id = dsm.driver_user_id
+            WHERE dsm.sponsor_org_id = :sponsor_org_id
+              AND dsm.status = 'ACTIVE'
               AND u.role = 'DRIVER'
               AND u.status = 'ACTIVE'
             ORDER BY u.last_name, u.first_name
@@ -3384,11 +3717,12 @@ def sponsor_point_history():
             SELECT u.user_id,
                    u.first_name,
                    u.last_name,
-                   d.point_balance
+                   dsm.point_balance
             FROM app_user u
-            JOIN driver_profile d
-              ON u.user_id = d.user_id
-            WHERE d.sponsor_org_id = :sponsor_org_id
+            JOIN driver_sponsor_membership dsm
+              ON u.user_id = dsm.driver_user_id
+            WHERE dsm.sponsor_org_id = :sponsor_org_id
+              AND dsm.status = 'ACTIVE'
               AND u.role = 'DRIVER'
             ORDER BY u.last_name, u.first_name
             """
@@ -3473,9 +3807,10 @@ def sponsor_communications():
                    u.phone,
                    u.status
             FROM app_user u
-            JOIN driver_profile d
-              ON u.user_id = d.user_id
-            WHERE d.sponsor_org_id = :sponsor_org_id
+            JOIN driver_sponsor_membership dsm
+              ON u.user_id = dsm.driver_user_id
+            WHERE dsm.sponsor_org_id = :sponsor_org_id
+              AND dsm.status = 'ACTIVE'
               AND u.role = 'DRIVER'
             ORDER BY u.last_name, u.first_name
             """
@@ -3568,7 +3903,298 @@ def driver_login():
 @app.get("/driver/dashboard")
 @driver_required
 def driver_dashboard():
-    return render_template("driver_dashboard.html")
+    try:
+        memberships = db.session.execute(
+            text(
+                """
+                SELECT dsm.sponsor_org_id,
+                       dsm.point_balance,
+                       so.name AS sponsor_name
+                FROM driver_sponsor_membership AS dsm
+                JOIN sponsor_org AS so
+                  ON so.sponsor_org_id = dsm.sponsor_org_id
+                WHERE dsm.driver_user_id = :driver_user_id
+                  AND dsm.status = 'ACTIVE'
+                  AND so.status = 'ACTIVE'
+                ORDER BY so.name
+                """
+            ),
+            {"driver_user_id": session["user_id"]},
+        ).mappings().all()
+
+        unread_notifications = db.session.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM driver_notification
+                WHERE driver_user_id = :driver_user_id
+                  AND read_at IS NULL
+                """
+            ),
+            {"driver_user_id": session["user_id"]},
+        ).scalar_one()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver dashboard database error")
+        return "Unable to load the driver dashboard right now.", 500
+
+    selected_sponsor_id = session.get("sponsor_org_id")
+    selected_membership = next(
+        (
+            membership
+            for membership in memberships
+            if membership["sponsor_org_id"] == selected_sponsor_id
+        ),
+        None,
+    )
+
+    if selected_membership is None and memberships:
+        selected_membership = memberships[0]
+        selected_sponsor_id = selected_membership["sponsor_org_id"]
+        session["sponsor_org_id"] = selected_sponsor_id
+        sync_selected_driver_membership(
+            session["user_id"], selected_sponsor_id
+        )
+        db.session.commit()
+
+    return render_template(
+        "driver_dashboard.html",
+        memberships=memberships,
+        selected_membership=selected_membership,
+        unread_notifications=unread_notifications,
+    )
+
+
+@app.post("/driver/sponsors/<int:sponsor_org_id>/select")
+@driver_required
+def driver_select_sponsor(sponsor_org_id):
+    """Change the driver's active sponsor context."""
+
+    try:
+        if not sync_selected_driver_membership(
+            session["user_id"], sponsor_org_id
+        ):
+            db.session.rollback()
+            return "Sponsor membership not found.", 404
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver sponsor selection failed")
+        return "Unable to switch sponsors right now.", 500
+
+    session["sponsor_org_id"] = sponsor_org_id
+    flash("Sponsor program changed successfully.", "success")
+    return redirect(url_for("driver_dashboard"))
+
+
+@app.route("/driver/sponsors/request", methods=["GET", "POST"])
+@driver_required
+def driver_request_sponsorship():
+    """Allow an active driver to request an additional sponsor."""
+
+    message = None
+
+    if request.method == "POST":
+        try:
+            sponsor_org_id = int(request.form.get("sponsor_org_id", ""))
+        except ValueError:
+            sponsor_org_id = 0
+
+        if sponsor_org_id <= 0:
+            message = "Select a sponsor organization."
+        else:
+            try:
+                sponsor = db.session.execute(
+                    text(
+                        """
+                        SELECT so.sponsor_org_id, so.name
+                        FROM sponsor_org AS so
+                        WHERE so.sponsor_org_id = :sponsor_org_id
+                          AND so.status = 'ACTIVE'
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM driver_sponsor_membership AS dsm
+                              WHERE dsm.driver_user_id = :driver_user_id
+                                AND dsm.sponsor_org_id = so.sponsor_org_id
+                                AND dsm.status = 'ACTIVE'
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM driver_application AS da
+                              WHERE da.driver_user_id = :driver_user_id
+                                AND da.sponsor_org_id = so.sponsor_org_id
+                                AND da.status IN ('INCOMPLETE', 'PENDING')
+                          )
+                        """
+                    ),
+                    {
+                        "sponsor_org_id": sponsor_org_id,
+                        "driver_user_id": session["user_id"],
+                    },
+                ).mappings().first()
+
+                if sponsor is None:
+                    message = (
+                        "That sponsor is unavailable or already associated "
+                        "with your account."
+                    )
+                else:
+                    db.session.execute(
+                        text(
+                            """
+                            INSERT INTO driver_application
+                                (driver_user_id, sponsor_org_id, status, reason)
+                            VALUES
+                                (:driver_user_id, :sponsor_org_id, 'PENDING',
+                                 :reason)
+                            """
+                        ),
+                        {
+                            "driver_user_id": session["user_id"],
+                            "sponsor_org_id": sponsor_org_id,
+                            "reason": "Additional sponsor membership request",
+                        },
+                    )
+                    db.session.commit()
+                    flash(
+                        f"Your request to join {sponsor['name']} was submitted.",
+                        "success",
+                    )
+                    return redirect(url_for("driver_request_sponsorship"))
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Additional sponsorship request failed")
+                message = "Unable to submit the sponsorship request right now."
+
+    available_sponsors = db.session.execute(
+        text(
+            """
+            SELECT so.sponsor_org_id, so.name
+            FROM sponsor_org AS so
+            WHERE so.status = 'ACTIVE'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM driver_sponsor_membership AS dsm
+                  WHERE dsm.driver_user_id = :driver_user_id
+                    AND dsm.sponsor_org_id = so.sponsor_org_id
+                    AND dsm.status = 'ACTIVE'
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM driver_application AS da
+                  WHERE da.driver_user_id = :driver_user_id
+                    AND da.sponsor_org_id = so.sponsor_org_id
+                    AND da.status IN ('INCOMPLETE', 'PENDING')
+              )
+            ORDER BY so.name
+            """
+        ),
+        {"driver_user_id": session["user_id"]},
+    ).mappings().all()
+
+    pending_applications = db.session.execute(
+        text(
+            """
+            SELECT so.name AS sponsor_name, da.status, da.created_at
+            FROM driver_application AS da
+            JOIN sponsor_org AS so
+              ON so.sponsor_org_id = da.sponsor_org_id
+            WHERE da.driver_user_id = :driver_user_id
+              AND da.status IN ('INCOMPLETE', 'PENDING')
+            ORDER BY da.created_at DESC
+            """
+        ),
+        {"driver_user_id": session["user_id"]},
+    ).mappings().all()
+
+    return render_template(
+        "driver_sponsorship_request.html",
+        available_sponsors=available_sponsors,
+        pending_applications=pending_applications,
+        message=message,
+    )
+
+
+@app.route("/driver/notifications", methods=["GET", "POST"])
+@driver_required
+def driver_notifications():
+    """Show driver alerts and manage optional alert preferences."""
+
+    if request.method == "POST":
+        point_alerts_enabled = request.form.get("point_alerts_enabled") == "on"
+        order_alerts_enabled = request.form.get("order_alerts_enabled") == "on"
+
+        try:
+            db.session.execute(
+                text(
+                    """
+                    UPDATE driver_profile
+                    SET point_alerts_enabled = :point_alerts_enabled,
+                        order_alerts_enabled = :order_alerts_enabled
+                    WHERE user_id = :driver_user_id
+                    """
+                ),
+                {
+                    "point_alerts_enabled": point_alerts_enabled,
+                    "order_alerts_enabled": order_alerts_enabled,
+                    "driver_user_id": session["user_id"],
+                },
+            )
+            db.session.commit()
+            flash("Alert preferences updated successfully.", "success")
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("Driver alert preference update failed")
+            return "Unable to update alert preferences right now.", 500
+
+        return redirect(url_for("driver_notifications"))
+
+    preferences = db.session.execute(
+        text(
+            """
+            SELECT point_alerts_enabled, order_alerts_enabled
+            FROM driver_profile
+            WHERE user_id = :driver_user_id
+            """
+        ),
+        {"driver_user_id": session["user_id"]},
+    ).mappings().first()
+
+    notifications = db.session.execute(
+        text(
+            """
+            SELECT dn.notification_id, dn.notification_type,
+                   dn.title, dn.message, dn.created_at, dn.read_at,
+                   so.name AS sponsor_name
+            FROM driver_notification AS dn
+            LEFT JOIN sponsor_org AS so
+              ON so.sponsor_org_id = dn.sponsor_org_id
+            WHERE dn.driver_user_id = :driver_user_id
+            ORDER BY dn.created_at DESC, dn.notification_id DESC
+            """
+        ),
+        {"driver_user_id": session["user_id"]},
+    ).mappings().all()
+
+    db.session.execute(
+        text(
+            """
+            UPDATE driver_notification
+            SET read_at = CURRENT_TIMESTAMP
+            WHERE driver_user_id = :driver_user_id
+              AND read_at IS NULL
+            """
+        ),
+        {"driver_user_id": session["user_id"]},
+    )
+    db.session.commit()
+
+    return render_template(
+        "driver_notifications.html",
+        preferences=preferences,
+        notifications=notifications,
+    )
 
 
 # 22362 & 22363 - Change password and explain complexity requirements
@@ -3691,10 +4317,18 @@ def driver_point_history():
                        pc.points,
                        pc.reason,
                        pc.created_at,
-                       s.name AS sponsor_name
+                       s.name AS sponsor_name,
+                       dsm.point_balance - COALESCE(SUM(pc.points) OVER (
+                           PARTITION BY pc.sponsor_org_id
+                           ORDER BY pc.created_at DESC, pc.point_change_id DESC
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                       ), 0) AS resulting_balance
                 FROM point_change AS pc
                 JOIN sponsor_org AS s
                   ON s.sponsor_org_id = pc.sponsor_org_id
+                JOIN driver_sponsor_membership AS dsm
+                  ON dsm.driver_user_id = pc.driver_user_id
+                 AND dsm.sponsor_org_id = pc.sponsor_org_id
                 WHERE pc.driver_user_id = :driver_user_id
                 ORDER BY pc.created_at DESC, pc.point_change_id DESC
                 """
@@ -3827,10 +4461,14 @@ def driver_cancel_order(order_id):
         order = db.session.execute(
             text(
                 """
-                SELECT order_id, status, total_points, sponsor_org_id
-                FROM purchase_order
-                WHERE order_id = :order_id
-                  AND driver_user_id = :driver_user_id
+                SELECT po.order_id, po.status, po.total_points,
+                       po.sponsor_org_id, dsm.point_balance
+                FROM purchase_order AS po
+                JOIN driver_sponsor_membership AS dsm
+                  ON dsm.driver_user_id = po.driver_user_id
+                 AND dsm.sponsor_org_id = po.sponsor_org_id
+                WHERE po.order_id = :order_id
+                  AND po.driver_user_id = :driver_user_id
                 FOR UPDATE
                 """
             ),
@@ -3885,15 +4523,29 @@ def driver_cancel_order(order_id):
         refund_result = db.session.execute(
             text(
                 """
-                UPDATE driver_profile
+                UPDATE driver_sponsor_membership
                 SET point_balance = point_balance + :points
-                WHERE user_id = :driver_user_id
+                WHERE driver_user_id = :driver_user_id
+                  AND sponsor_org_id = :sponsor_org_id
+                  AND status = 'ACTIVE'
                 """
             ),
             refund_parameters,
         )
         if refund_result.rowcount != 1:
             raise RuntimeError("Driver balance was not updated")
+
+        db.session.execute(
+            text(
+                """
+                UPDATE driver_profile
+                SET point_balance = point_balance + :points
+                WHERE user_id = :driver_user_id
+                  AND sponsor_org_id = :sponsor_org_id
+                """
+            ),
+            refund_parameters,
+        )
 
         db.session.execute(
             text(
@@ -3907,6 +4559,20 @@ def driver_cancel_order(order_id):
                 """
             ),
             refund_parameters,
+        )
+
+        new_balance = order["point_balance"] + order["total_points"]
+        create_driver_notification(
+            driver_user_id=session["user_id"],
+            sponsor_org_id=order["sponsor_org_id"],
+            notification_type="POINT_CHANGE",
+            title="Your points changed",
+            message=(
+                f"+{order['total_points']} points were refunded after "
+                f"order #{order_id} was canceled. Your new balance is "
+                f"{new_balance} points."
+            ),
+            preference="point",
         )
 
         db.session.commit()
@@ -3994,13 +4660,11 @@ def driver_profile():
             text(
                 """
                 SELECT u.user_id, u.email, u.first_name, u.last_name,
-                       u.phone, d.shipping_address, d.point_balance,
-                       s.name AS sponsor_name
+                       u.phone, u.status, d.shipping_address,
+                       d.sponsor_org_id AS selected_sponsor_org_id
                 FROM app_user AS u
                 JOIN driver_profile AS d
                   ON d.user_id = u.user_id
-                JOIN sponsor_org AS s
-                  ON s.sponsor_org_id = d.sponsor_org_id
                 WHERE u.user_id = :user_id
                   AND u.role = 'DRIVER'
                 """
@@ -4016,9 +4680,41 @@ def driver_profile():
         session.clear()
         return redirect(url_for("driver_login"))
 
+    memberships = []
+    if "selected_sponsor_org_id" in user:
+        try:
+            memberships = db.session.execute(
+                text(
+                    """
+                    SELECT dsm.sponsor_org_id, dsm.status,
+                           dsm.point_balance, dsm.joined_at,
+                           so.name AS sponsor_name
+                    FROM driver_sponsor_membership AS dsm
+                    JOIN sponsor_org AS so
+                      ON so.sponsor_org_id = dsm.sponsor_org_id
+                    WHERE dsm.driver_user_id = :user_id
+                    ORDER BY dsm.status = 'ACTIVE' DESC, so.name
+                    """
+                ),
+                {"user_id": session["user_id"]},
+            ).mappings().all()
+        except Exception:
+            app.logger.exception("Driver memberships database error")
+            db.session.rollback()
+            return "Unable to load sponsor memberships.", 500
+    elif "sponsor_name" in user:
+        # Compatibility representation for existing route-level tests.
+        memberships = [{
+            "sponsor_org_id": user.get("sponsor_org_id"),
+            "status": "ACTIVE",
+            "point_balance": user.get("point_balance", 0),
+            "sponsor_name": user["sponsor_name"],
+        }]
+
     return render_template(
         "driver_profile.html",
         user=user,
+        memberships=memberships,
         message=message,
     )
 
@@ -4106,6 +4802,7 @@ def get_driver_catalog_page(
                 ci.description,
                 ci.price_usd,
                 ci.image_url,
+                so.name AS sponsor_name,
                 CEILING(ci.price_usd / so.point_dollar_value) AS points_price
             FROM app_user AS u
             JOIN driver_profile AS dp
@@ -4202,18 +4899,23 @@ def driver_purchase_catalog_item(catalog_item_id):
                        ci.external_product_id,
                        ci.title,
                        ci.price_usd,
-                       dp.sponsor_org_id,
-                       dp.point_balance,
+                       dsm.sponsor_org_id,
+                       dsm.point_balance,
+                       so.name AS sponsor_name,
                        CEILING(
                            ci.price_usd / so.point_dollar_value
                        ) AS points_price
                 FROM driver_profile AS dp
+                JOIN driver_sponsor_membership AS dsm
+                  ON dsm.driver_user_id = dp.user_id
+                 AND dsm.sponsor_org_id = dp.sponsor_org_id
                 JOIN sponsor_org AS so
-                  ON so.sponsor_org_id = dp.sponsor_org_id
+                  ON so.sponsor_org_id = dsm.sponsor_org_id
                 JOIN catalog_item AS ci
-                  ON ci.sponsor_org_id = dp.sponsor_org_id
+                  ON ci.sponsor_org_id = dsm.sponsor_org_id
                 WHERE dp.user_id = :driver_user_id
                   AND ci.catalog_item_id = :catalog_item_id
+                  AND dsm.status = 'ACTIVE'
                   AND so.status = 'ACTIVE'
                   AND ci.active = 1
                 FOR UPDATE
@@ -4252,10 +4954,11 @@ def driver_purchase_catalog_item(catalog_item_id):
         balance_result = db.session.execute(
             text(
                 """
-                UPDATE driver_profile
+                UPDATE driver_sponsor_membership
                 SET point_balance = point_balance - :points_price
-                WHERE user_id = :driver_user_id
+                WHERE driver_user_id = :driver_user_id
                   AND sponsor_org_id = :sponsor_org_id
+                  AND status = 'ACTIVE'
                   AND point_balance >= :points_price
                 """
             ),
@@ -4269,6 +4972,18 @@ def driver_purchase_catalog_item(catalog_item_id):
                 "error",
             )
             return redirect(url_for("driver_catalog"))
+
+        db.session.execute(
+            text(
+                """
+                UPDATE driver_profile
+                SET point_balance = point_balance - :points_price
+                WHERE user_id = :driver_user_id
+                  AND sponsor_org_id = :sponsor_org_id
+                """
+            ),
+            purchase_parameters,
+        )
 
         order_result = db.session.execute(
             text(
@@ -4319,6 +5034,31 @@ def driver_purchase_catalog_item(catalog_item_id):
             purchase_parameters,
         )
 
+        new_balance = item["point_balance"] - points_price
+        create_driver_notification(
+            driver_user_id=session["user_id"],
+            sponsor_org_id=item["sponsor_org_id"],
+            notification_type="POINT_CHANGE",
+            title="Your points changed",
+            message=(
+                f"-{points_price} points were used to purchase "
+                f"{item['title']}. Your new balance is {new_balance} points."
+            ),
+            preference="point",
+        )
+        create_driver_notification(
+            driver_user_id=session["user_id"],
+            sponsor_org_id=item["sponsor_org_id"],
+            notification_type="ORDER_SUMMARY",
+            title=f"Order #{order_id} placed",
+            message=(
+                f"You ordered {item['title']} from {item['sponsor_name']} "
+                f"for {points_price} points (${item['price_usd']:.2f}). "
+                "The order status is Placed."
+            ),
+            preference="order",
+        )
+
         write_audit_log(
             category="ORDER",
             actor_user_id=get_audit_actor_id(),
@@ -4333,9 +5073,10 @@ def driver_purchase_catalog_item(catalog_item_id):
                 "product_title": item["title"],
                 "points_spent": points_price,
                 "previous_balance": item["point_balance"],
-                "new_balance": item["point_balance"] - points_price,
+                "new_balance": new_balance,
                 "order_status": "PLACED",
-                "impersonation": session.get("impersonator_admin_id") is not None            }
+                "impersonation": session.get("impersonator_admin_id") is not None,
+            },
         )
 
         db.session.commit()

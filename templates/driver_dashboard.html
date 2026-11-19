@@ -20,6 +20,43 @@
         <p>Welcome! You are successfully signed in.</p>
     {% endif %}
 
+    {% with flashed_messages = get_flashed_messages(with_categories=true) %}
+        {% for category, flashed_message in flashed_messages %}
+            <p class="message{% if category == 'error' %} message-error{% endif %}"
+               role="status">{{ flashed_message }}</p>
+        {% endfor %}
+    {% endwith %}
+
+    {% if selected_membership %}
+        <section class="profile-summary" aria-label="Selected sponsor program">
+            <div>
+                <h2>Current Sponsor</h2>
+                <p><strong>{{ selected_membership['sponsor_name'] }}</strong></p>
+                <p>{{ selected_membership['point_balance'] }} points</p>
+            </div>
+        </section>
+    {% endif %}
+
+    {% if memberships|length > 1 %}
+        <section>
+            <h2>My Sponsors</h2>
+            <p>Select the sponsor program you want to use.</p>
+            <div class="actions">
+                {% for membership in memberships %}
+                    {% if not selected_membership or membership['sponsor_org_id'] != selected_membership['sponsor_org_id'] %}
+                        <form class="inline-form" method="POST"
+                              action="{{ url_for('driver_select_sponsor', sponsor_org_id=membership['sponsor_org_id']) }}">
+                            <button type="submit">
+                                Use {{ membership['sponsor_name'] }}
+                                ({{ membership['point_balance'] }} points)
+                            </button>
+                        </form>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+
     <div class="actions">
         <a class="button-link" href="{{ url_for('driver_profile') }}">
             My Profile
@@ -35,6 +72,14 @@
 
         <a class="button-link" href="{{ url_for('driver_orders') }}">
             My Purchases
+        </a>
+
+        <a class="button-link" href="{{ url_for('driver_notifications') }}">
+            Alerts{% if unread_notifications %} ({{ unread_notifications }} new){% endif %}
+        </a>
+
+        <a class="button-link" href="{{ url_for('driver_request_sponsorship') }}">
+            Request Another Sponsor
         </a>
 
        

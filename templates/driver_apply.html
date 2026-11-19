@@ -18,7 +18,7 @@
     {% if saved_application %}
         <p>Review your saved application below. You can make changes before submitting it.</p>
     {% else %}
-        <p>Fill out the application below to apply to a sponsor organization.</p>
+        <p>Fill out the application below and select one or more sponsor organizations.</p>
     {% endif %}
 
     <form method="POST">
@@ -76,12 +76,13 @@
             {% endif %}
         </select>
 
-        <label for="sponsor_org_id">Organization</label>
-        <select id="sponsor_org_id" name="sponsor_org_id" required>
-            <option value="">Select an organization</option>
+        <label for="sponsor_org_ids">Sponsor Organizations</label>
+        <p>Select every sponsor you want to apply to.</p>
+        <select id="sponsor_org_ids" name="sponsor_org_ids" multiple size="{{ [organizations|length, 6]|min }}" required>
 
             {% for organization in organizations %}
-                {% if saved_application and saved_application.sponsor_org_id == organization.sponsor_org_id %}
+                {% set saved_ids = saved_application.sponsor_org_ids.split(',') if saved_application and saved_application.sponsor_org_ids else [] %}
+                {% if organization.sponsor_org_id|string in saved_ids %}
                     <option value="{{ organization.sponsor_org_id }}" selected>
                         {{ organization.name }}
                     </option>

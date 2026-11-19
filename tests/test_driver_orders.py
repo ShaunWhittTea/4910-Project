@@ -190,10 +190,13 @@ class DriverOrderTests(unittest.TestCase):
                         "status": "PLACED",
                         "total_points": 1200,
                         "sponsor_org_id": 7,
+                        "point_balance": 300,
                     }),
                     update_result,
                     refund_result,
                     point_change_result,
+                    MagicMock(),
+                    MagicMock(),
                     active_driver_result(),
                     query_result(canceled_order),
                     query_rows_result(sample_lines()),
@@ -229,8 +232,11 @@ class DriverOrderTests(unittest.TestCase):
         self.assertEqual(refund_parameters["points"], 1200)
         self.assertEqual(refund_parameters["sponsor_org_id"], 7)
 
-        point_query = str(execute.call_args_list[4].args[0])
-        point_parameters = execute.call_args_list[4].args[1]
+        cache_query = str(execute.call_args_list[4].args[0])
+        self.assertIn("UPDATE driver_profile", cache_query)
+
+        point_query = str(execute.call_args_list[5].args[0])
+        point_parameters = execute.call_args_list[5].args[1]
         self.assertIn("INSERT INTO point_change", point_query)
         self.assertEqual(point_parameters["points"], 1200)
         self.assertIn("canceled order #501", point_parameters["reason"])

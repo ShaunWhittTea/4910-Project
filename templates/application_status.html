@@ -12,44 +12,27 @@
 
     <h1>Driver Application Status</h1>
 
-    {% if application.status == "PENDING" %}
-
-        <h2>Application Pending</h2>
-
-        <p>
-            Your application to
-            <strong>{{ application.organization_name }}</strong>
-            is currently under review.
-        </p>
-
-        <p>
-            Please check back later for an updated decision.
-        </p>
-
-    {% elif application.status == "REJECTED" %}
-
-        <h2>Application Not Approved</h2>
-
-        <p>
-            Your application to
-            <strong>{{ application.organization_name }}</strong>
-            was not approved at this time.
-        </p>
-
-        {% if application.decision_reason %}
-            <p>
-                <strong>Reason:</strong>
-                {{ application.decision_reason }}
-            </p>
-        {% endif %}
-
-        <p>
-            If you have questions about this decision, please contact
-            <strong>{{ application.organization_name }}</strong>
-            for more information.
-        </p>
-
-    {% endif %}
+    {% for application in applications %}
+        <section class="notification-card">
+            <h2>{{ application.organization_name }}</h2>
+            {% if application.status == "PENDING" %}
+                <h3>Application Pending</h3>
+                <p><strong>Status:</strong> Pending</p>
+                <p>This application is currently under review.</p>
+            {% elif application.status == "REJECTED" %}
+                <h3>Application Not Approved</h3>
+                <p><strong>Status:</strong> Not Approved</p>
+                {% if application.decision_reason %}
+                    <p><strong>Reason:</strong> {{ application.decision_reason }}</p>
+                {% endif %}
+            {% elif application.status == "INCOMPLETE" %}
+                <p><strong>Status:</strong> Incomplete</p>
+                <p>Return to your application to finish and submit it.</p>
+            {% else %}
+                <p><strong>Status:</strong> {{ application.status|title }}</p>
+            {% endif %}
+        </section>
+    {% endfor %}
 
     <a href="{{ url_for('logout') }}">
         <button type="button">Logout</button>

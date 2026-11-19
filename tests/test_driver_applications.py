@@ -141,6 +141,55 @@ class DriverApplicationTests(unittest.TestCase):
 
         commit.assert_called_once()
 
+    def test_driver_can_apply_to_multiple_sponsors_at_registration(self):
+        organizations = mapping_all([
+            {"sponsor_org_id": 7, "name": "Test Sponsor"},
+            {"sponsor_org_id": 8, "name": "Second Sponsor"},
+        ])
+        no_existing_user = MagicMock()
+        no_existing_user.first.return_value = None
+
+        with (
+            patch.object(
+                driver_app.db.session,
+                "execute",
+                side_effect=[
+                    organizations,
+                    no_existing_user,
+                    insert_result(42),
+                    normal_result(),
+                    normal_result(),
+                ],
+            ) as execute,
+            patch.object(driver_app.db.session, "commit") as commit,
+        ):
+            response = self.client.post(
+                "/apply",
+                data={
+                    "action": "submit",
+                    "first_name": "Test",
+                    "last_name": "Driver",
+                    "email": "multi@example.com",
+                    "phone": "8645551234",
+                    "has_license": "YES",
+                    "sponsor_org_ids": ["7", "8"],
+                    "password": "TestPassword1!",
+                    "confirm_password": "TestPassword1!",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        application_calls = execute.call_args_list[3:5]
+        self.assertEqual(
+            [call.args[1]["sponsor_org_id"] for call in application_calls],
+            ["7", "8"],
+        )
+        self.assertTrue(all(
+            "INSERT INTO driver_application" in str(call.args[0])
+            for call in application_calls
+        ))
+        commit.assert_called_once_with()
+
     def test_pending_driver_can_view_application_status(self):
 
         self.sign_in_driver()
@@ -200,6 +249,7 @@ class DriverApplicationTests(unittest.TestCase):
                     normal_result(),
                     normal_result(),
                     normal_result(),
+                    normal_result(),
                 ],
             ) as execute,
             patch.object(
@@ -235,8 +285,16 @@ class DriverApplicationTests(unittest.TestCase):
             profile_sql,
         )
 
-        user_sql = str(
+        membership_sql = str(
             execute.call_args_list[3].args[0]
+        )
+        self.assertIn(
+            "INSERT INTO driver_sponsor_membership",
+            membership_sql,
+        )
+
+        user_sql = str(
+            execute.call_args_list[4].args[0]
         )
 
         self.assertIn(

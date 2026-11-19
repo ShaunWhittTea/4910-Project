@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Request Another Sponsor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+<main class="container">
+    <a class="back-link" href="{{ url_for('driver_dashboard') }}">Back to Dashboard</a>
+    <h1>Request Another Sponsor</h1>
+
+    {% with flashed_messages = get_flashed_messages(with_categories=true) %}
+        {% for category, flashed_message in flashed_messages %}
+            <p class="message" role="status">{{ flashed_message }}</p>
+        {% endfor %}
+    {% endwith %}
+    {% if message %}<p class="message message-error" role="status">{{ message }}</p>{% endif %}
+
+    {% if available_sponsors %}
+        <form method="POST">
+            <label for="sponsor_org_id">Sponsor Organization</label>
+            <select id="sponsor_org_id" name="sponsor_org_id" required>
+                <option value="">Select a sponsor</option>
+                {% for sponsor in available_sponsors %}
+                    <option value="{{ sponsor['sponsor_org_id'] }}">{{ sponsor['name'] }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">Submit Request</button>
+        </form>
+    {% else %}
+        <p>There are no additional sponsors available to request right now.</p>
+    {% endif %}
+
+    {% if pending_applications %}
+        <h2>Pending Requests</h2>
+        <ul>
+            {% for application in pending_applications %}
+                <li>{{ application['sponsor_name'] }} — {{ application['status']|title }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+</main>
+</body>
+</html>

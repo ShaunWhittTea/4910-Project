@@ -34,7 +34,13 @@
         <header class="catalog-header">
             <div>
                 <h1>My Sponsor Catalog</h1>
-                <p>Browse rewards available through your sponsor.</p>
+                {% if catalog_items %}
+                    <p>
+                        Browse rewards from <strong>{{ catalog_items[0].sponsor_name }}</strong>.
+                    </p>
+                {% else %}
+                    <p>Browse rewards available through your selected sponsor.</p>
+                {% endif %}
             </div>
 
             <p class="catalog-count">

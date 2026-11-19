@@ -32,6 +32,7 @@ def sample_item(point_balance=5000):
         "title": "Rechargeable Flashlight",
         "price_usd": Decimal("18.99"),
         "sponsor_org_id": 7,
+        "sponsor_name": "Test Sponsor",
         "point_balance": point_balance,
         "points_price": 1899,
     }
@@ -69,6 +70,10 @@ class CatalogPurchaseTests(unittest.TestCase):
         order_result = MagicMock(lastrowid=777)
         line_result = MagicMock()
         point_result = MagicMock()
+        cache_result = MagicMock()
+        point_alert_result = MagicMock()
+        order_alert_result = MagicMock()
+        audit_result = MagicMock()
 
         with (
             patch.object(
@@ -78,9 +83,13 @@ class CatalogPurchaseTests(unittest.TestCase):
                     active_driver_result(),
                     query_result(sample_item()),
                     balance_result,
+                    cache_result,
                     order_result,
                     line_result,
                     point_result,
+                    point_alert_result,
+                    order_alert_result,
+                    audit_result,
                 ],
             ) as execute,
             patch.object(catalog_app.db.session, "commit") as commit,
@@ -93,7 +102,7 @@ class CatalogPurchaseTests(unittest.TestCase):
 
         lookup_query = str(execute.call_args_list[1].args[0])
         lookup_parameters = execute.call_args_list[1].args[1]
-        self.assertIn("ci.sponsor_org_id = dp.sponsor_org_id", lookup_query)
+        self.assertIn("ci.sponsor_org_id = dsm.sponsor_org_id", lookup_query)
         self.assertIn("ci.active = 1", lookup_query)
         self.assertEqual(lookup_parameters, {
             "catalog_item_id": 3,
@@ -106,17 +115,20 @@ class CatalogPurchaseTests(unittest.TestCase):
         self.assertIn("point_balance = point_balance - :points_price", balance_query)
         self.assertEqual(balance_parameters["points_price"], 1899)
 
-        order_query = str(execute.call_args_list[3].args[0])
+        cache_query = str(execute.call_args_list[3].args[0])
+        self.assertIn("UPDATE driver_profile", cache_query)
+
+        order_query = str(execute.call_args_list[4].args[0])
         self.assertIn("INSERT INTO purchase_order", order_query)
         self.assertIn("'PLACED'", order_query)
 
-        line_query = str(execute.call_args_list[4].args[0])
-        line_parameters = execute.call_args_list[4].args[1]
+        line_query = str(execute.call_args_list[5].args[0])
+        line_parameters = execute.call_args_list[5].args[1]
         self.assertIn("INSERT INTO order_line", line_query)
         self.assertEqual(line_parameters["order_id"], 777)
         self.assertEqual(line_parameters["title"], "Rechargeable Flashlight")
 
-        point_query = str(execute.call_args_list[5].args[0])
+        point_query = str(execute.call_args_list[6].args[0])
         self.assertIn("INSERT INTO point_change", point_query)
         self.assertIn("-:points_price", point_query)
 
