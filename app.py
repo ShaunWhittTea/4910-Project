@@ -4056,45 +4056,154 @@ def get_positive_int(
 
     return value
 
+CATALOG_SORT_ORDERS = {
+    "default": "ci.catalog_item_id ASC",
+    "name_asc": "ci.title ASC, ci.catalog_item_id ASC",
+    "name_desc": "ci.title DESC, ci.catalog_item_id ASC",
+    "points_asc": "points_price ASC, ci.catalog_item_id ASC",
+    "points_desc": "points_price DESC, ci.catalog_item_id ASC",
+}
+
+CATALOG_POINTS_MAX = 2_147_483_647
+
+
+def validate_catalog_points_range(min_points, max_points):
+    """Validate optional inclusive integer bounds."""
+
+    for name, value in (
+        ("minPoints", min_points),
+        ("maxPoints", max_points),
+    ):
+        if value is not None and (
+            type(value) is not int
+            or value < 0
+            or value > CATALOG_POINTS_MAX
+        ):
+            raise ValueError(
+                f"{name} must be a whole number between "
+                f"0 and {CATALOG_POINTS_MAX}."
+            )
+
+    if (
+        min_points is not None
+        and max_points is not None
+        and min_points > max_points
+    ):
+        raise ValueError("minPoints must not exceed maxPoints.")
+
+
+def get_optional_catalog_points(name: str) -> int | None:
+    """Parse a blank/missing bound as unrestricted."""
+
+    raw_value = request.args.get(name, "").strip()
+    if not raw_value:
+        return None
+
+    if (
+        len(raw_value) > 10
+        or not raw_value.isascii()
+        or not raw_value.isdigit()
+    ):
+        raise ValueError(
+            f"{name} must be a whole number between "
+            f"0 and {CATALOG_POINTS_MAX}."
+        )
+
+    value = int(raw_value)
+    if value > CATALOG_POINTS_MAX:
+        raise ValueError(
+            f"{name} must be a whole number between "
+            f"0 and {CATALOG_POINTS_MAX}."
+        )
+
+    return value
 
 def get_driver_catalog_page(
     driver_user_id: int,
     page: int,
     page_size: int,
+    *,
+    query: str = "",
+    category: str = "",
+    sort: str = "default",
+    min_points: int | None = None,
+    max_points: int | None = None,
 ) -> tuple[list[dict], int]:
+    """Load a filtered page of the driver's own active sponsor catalog."""
+
+    validate_catalog_points_range(min_points, max_points)
+
+    query = query.strip()
+    category = category.strip()
+
+    if len(query) > 100:
+        raise ValueError("Search query must be 100 characters or fewer.")
+
+    if len(category) > 120:
+        raise ValueError("Category must be 120 characters or fewer.")
+
+    if sort not in CATALOG_SORT_ORDERS:
+        raise ValueError("Unsupported catalog sort option.")
+
+    scope_sql = """
+        FROM app_user AS u
+        JOIN driver_profile AS dp
+            ON dp.user_id = u.user_id
+        JOIN sponsor_org AS so
+            ON so.sponsor_org_id = dp.sponsor_org_id
+        JOIN catalog_item AS ci
+            ON ci.sponsor_org_id = dp.sponsor_org_id
+        WHERE u.user_id = :driver_user_id
+          AND u.role = 'DRIVER'
+          AND u.status = 'ACTIVE'
+          AND so.status = 'ACTIVE'
+          AND ci.active = 1
     """
-    Load one page of the authenticated driver's active sponsor catalog.
 
-    Sponsor scope is derived from driver_profile in SQL. It is never accepted
-    from the query string or trusted from the browser session.
-    """
+    filters = {"driver_user_id": driver_user_id}
 
-    offset = (page - 1) * page_size
+    if query:
+        escaped_query = (
+            query.replace("!", "!!")
+            .replace("%", "!%")
+            .replace("_", "!_")
+        )
+        filters["keyword"] = f"%{escaped_query}%"
 
-    filters = {
-        "driver_user_id": driver_user_id,
-    }
+        scope_sql += """
+          AND (
+              LOWER(ci.title) LIKE LOWER(:keyword) ESCAPE '!'
+              OR LOWER(COALESCE(ci.description, ''))
+                  LIKE LOWER(:keyword) ESCAPE '!'
+          )
+        """
+
+    if category:
+        filters["category"] = category
+        scope_sql += """
+          AND ci.category = :category
+        """
+
+    if min_points is not None:
+        filters["min_points"] = min_points
+        scope_sql += """
+          AND CEILING(ci.price_usd / so.point_dollar_value)
+              >= :min_points
+        """
+
+    if max_points is not None:
+        filters["max_points"] = max_points
+        scope_sql += """
+          AND CEILING(ci.price_usd / so.point_dollar_value)
+              <= :max_points
+        """
 
     total_items = db.session.execute(
-        text(
-            """
-            SELECT COUNT(*) AS total_items
-            FROM app_user AS u
-            JOIN driver_profile AS dp
-              ON dp.user_id = u.user_id
-            JOIN sponsor_org AS so
-              ON so.sponsor_org_id = dp.sponsor_org_id
-            JOIN catalog_item AS ci
-              ON ci.sponsor_org_id = dp.sponsor_org_id
-            WHERE u.user_id = :driver_user_id
-              AND u.role = 'DRIVER'
-              AND u.status = 'ACTIVE'
-              AND so.status = 'ACTIVE'
-              AND ci.active = 1
-            """
-        ),
+        text("SELECT COUNT(*) " + scope_sql),
         filters,
     ).scalar_one()
+
+    order_sql = CATALOG_SORT_ORDERS[sort]
 
     catalog_items = db.session.execute(
         text(
@@ -4104,39 +4213,30 @@ def get_driver_catalog_page(
                 ci.external_product_id,
                 ci.title,
                 ci.description,
+                ci.category,
                 ci.price_usd,
                 ci.image_url,
-                CEILING(ci.price_usd / so.point_dollar_value) AS points_price
-            FROM app_user AS u
-            JOIN driver_profile AS dp
-              ON dp.user_id = u.user_id
-            JOIN sponsor_org AS so
-              ON so.sponsor_org_id = dp.sponsor_org_id
-            JOIN catalog_item AS ci
-              ON ci.sponsor_org_id = dp.sponsor_org_id
-            WHERE u.user_id = :driver_user_id
-              AND u.role = 'DRIVER'
-              AND u.status = 'ACTIVE'
-              AND so.status = 'ACTIVE'
-              AND ci.active = 1
-            ORDER BY ci.catalog_item_id ASC
+                CEILING(
+                    ci.price_usd / so.point_dollar_value
+                ) AS points_price
+            """
+            + scope_sql
+            + f"""
+            ORDER BY {order_sql}
             LIMIT :page_size OFFSET :offset
             """
         ),
         {
-            "driver_user_id": driver_user_id,
+            **filters,
             "page_size": page_size,
-            "offset": offset,
+            "offset": (page - 1) * page_size,
         },
     ).mappings().all()
 
     return [dict(item) for item in catalog_items], total_items
 
-
-@app.get("/driver/catalog")
-@driver_required
-def driver_catalog():
-    """Render the authenticated driver's paginated sponsor catalog."""
+def get_catalog_request_options() -> dict:
+    """Validate catalog query parameters shared by HTML and JSON routes."""
 
     page = get_positive_int(
         request.args.get("page"),
@@ -4150,37 +4250,120 @@ def driver_catalog():
     )
 
     if page is None or page_size is None:
-        return "page and pageSize must be positive integers.", 400
+        raise ValueError("page and pageSize must be positive integers.")
+
+    query = request.args.get("q", "").strip()
+    category = request.args.get("category", "").strip()
+    sort = request.args.get("sort", "default").strip()
+
+    if len(query) > 100:
+        raise ValueError("Search query must be 100 characters or fewer.")
+    if len(category) > 120:
+        raise ValueError("Category must be 120 characters or fewer.")
+    if sort not in CATALOG_SORT_ORDERS:
+        raise ValueError("Unsupported catalog sort option.")
+
+    min_points = get_optional_catalog_points("minPoints")
+    max_points = get_optional_catalog_points("maxPoints")
+    validate_catalog_points_range(min_points, max_points)
+
+    return {
+        "page": page,
+        "page_size": page_size,
+        "query": query,
+        "category": category,
+        "sort": sort,
+        "min_points": min_points,
+        "max_points": max_points,
+    }
+
+
+def get_driver_catalog_categories(driver_user_id: int) -> list[str]:
+    """List categories only from the driver's own active sponsor catalog."""
+
+    categories = db.session.execute(
+        text(
+            """
+            SELECT DISTINCT ci.category
+            FROM app_user AS u
+            JOIN driver_profile AS dp
+                ON dp.user_id = u.user_id
+            JOIN sponsor_org AS so
+                ON so.sponsor_org_id = dp.sponsor_org_id
+            JOIN catalog_item AS ci
+                ON ci.sponsor_org_id = dp.sponsor_org_id
+            WHERE u.user_id = :driver_user_id
+              AND u.role = 'DRIVER'
+              AND u.status = 'ACTIVE'
+              AND so.status = 'ACTIVE'
+              AND ci.active = 1
+              AND ci.category IS NOT NULL
+              AND TRIM(ci.category) <> ''
+            ORDER BY ci.category ASC
+            """
+        ),
+        {"driver_user_id": driver_user_id},
+    ).scalars().all()
+
+    return list(categories)
+
+
+@app.get("/driver/catalog")
+@driver_required
+def driver_catalog():
+    """Render the driver's filtered, sorted sponsor catalog."""
+
+    try:
+        options = get_catalog_request_options()
+    except ValueError as exc:
+        return str(exc), 400
 
     try:
         catalog_items, total_items = get_driver_catalog_page(
             driver_user_id=session["user_id"],
-            page=page,
-            page_size=page_size,
+            **options,
         )
+
+        total_pages = max(
+            1,
+            (total_items + options["page_size"] - 1)
+            // options["page_size"],
+        )
+
+        if options["page"] > total_pages:
+            return redirect(
+                url_for(
+                    "driver_catalog",
+                    page=total_pages,
+                    pageSize=options["page_size"],
+                    q=options["query"],
+                    category=options["category"],
+                    sort=options["sort"],
+                    minPoints=options["min_points"],
+                    maxPoints=options["max_points"],
+                )
+            )
+
+        categories = get_driver_catalog_categories(session["user_id"])
+
     except Exception:
         db.session.rollback()
         app.logger.exception("Driver catalog database error")
         return "Unable to load catalog right now.", 500
 
-    total_pages = max(1, (total_items + page_size - 1) // page_size)
-
-    if page > total_pages and total_items > 0:
-        return redirect(
-            url_for(
-                "driver_catalog",
-                page=total_pages,
-                pageSize=page_size,
-            )
-        )
-
     return render_template(
         "driver_catalog.html",
         catalog_items=catalog_items,
-        page=page,
-        page_size=page_size,
         total_items=total_items,
         total_pages=total_pages,
+        page=options["page"],
+        page_size=options["page_size"],
+        query=options["query"],
+        selected_category=options["category"],
+        selected_sort=options["sort"],
+        categories=categories,
+        min_points=options["min_points"],
+        max_points=options["max_points"],
     )
 
 
@@ -4356,39 +4539,26 @@ def driver_purchase_catalog_item(catalog_item_id):
 @app.get("/api/catalog/items")
 @driver_required
 def catalog_items_api():
-    """Return the same secured, sponsor-scoped page as JSON."""
+    """Return a filtered, sorted page from the driver's sponsor catalog."""
 
-    page = get_positive_int(
-        request.args.get("page"),
-        default=1,
-        maximum=1_000_000,
-    )
-    page_size = get_positive_int(
-        request.args.get("pageSize"),
-        default=12,
-        maximum=50,
-    )
-
-    if page is None or page_size is None:
-        return {
-            "message": "page and pageSize must be positive integers.",
-        }, 400
+    try:
+        options = get_catalog_request_options()
+    except ValueError as exc:
+        return {"message": str(exc)}, 400
 
     try:
         catalog_items, total_items = get_driver_catalog_page(
             driver_user_id=session["user_id"],
-            page=page,
-            page_size=page_size,
+            **options,
         )
     except Exception:
         db.session.rollback()
         app.logger.exception("Catalog API database error")
-        return {
-            "message": "Unable to load catalog right now.",
-        }, 500
+        return {"message": "Unable to load catalog right now."}, 500
 
     total_pages = (
-        (total_items + page_size - 1) // page_size
+        (total_items + options["page_size"] - 1)
+        // options["page_size"]
         if total_items > 0
         else 0
     )
@@ -4396,8 +4566,8 @@ def catalog_items_api():
     return {
         "items": catalog_items,
         "pagination": {
-            "page": page,
-            "pageSize": page_size,
+            "page": options["page"],
+            "pageSize": options["page_size"],
             "totalItems": total_items,
             "totalPages": total_pages,
         },
