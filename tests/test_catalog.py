@@ -116,6 +116,108 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(client.get_by_external_id(results[0].external_product_id), results[0])
         self.assertIsNone(client.get_by_external_id("nonexistent"))
 
+    def test_catalog_api_forwards_search_filter_and_sort(self):
+        self.sign_in()
+
+        with (
+            patch.object(
+                catalog_app.db.session,
+                "execute",
+                return_value=authorized_driver(),
+            ),
+            patch.object(
+                catalog_app,
+                "get_driver_catalog_page",
+                return_value=([], 0),
+            ) as get_page,
+        ):
+            response = self.client.get(
+                "/api/catalog/items",
+                query_string={
+                    "q": "  thermos  ",
+                    "category": "Drinkware",
+                    "sort": "points_asc",
+                    "page": 2,
+                    "pageSize": 5,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        get_page.assert_called_once_with(
+            driver_user_id=2,
+            page=2,
+            page_size=5,
+            query="thermos",
+            category="Drinkware",
+            sort="points_asc",
+        )
+
+    def test_invalid_catalog_controls_do_not_query_products(self):
+        self.sign_in()
+
+        invalid_queries = [
+            {"sort": "arbitrary_sql"},
+            {"q": "x" * 101},
+            {"category": "x" * 121},
+        ]
+
+        with (
+            patch.object(
+                catalog_app.db.session,
+                "execute",
+                return_value=authorized_driver(),
+            ),
+            patch.object(
+                catalog_app,
+                "get_driver_catalog_page",
+            ) as get_page,
+        ):
+            for query in invalid_queries:
+                with self.subTest(query=query):
+                    response = self.client.get(
+                        "/api/catalog/items",
+                        query_string=query,
+                    )
+                    self.assertEqual(response.status_code, 400)
+
+        get_page.assert_not_called()
+
+    def test_html_page_clamp_preserves_controls(self):
+        self.sign_in()
+
+        with (
+            patch.object(
+                catalog_app.db.session,
+                "execute",
+                return_value=authorized_driver(),
+            ),
+            patch.object(
+                catalog_app,
+                "get_driver_catalog_page",
+                return_value=([], 12),
+            ),
+            patch.object(
+                catalog_app,
+                "get_driver_catalog_categories",
+            ) as get_categories,
+        ):
+            response = self.client.get(
+                "/driver/catalog",
+                query_string={
+                    "q": "thermos",
+                    "category": "Drinkware",
+                    "sort": "points_desc",
+                    "page": 99,
+                    "pageSize": 5,
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("page=3", response.location)
+        self.assertIn("q=thermos", response.location)
+        self.assertIn("category=Drinkware", response.location)
+        self.assertIn("sort=points_desc", response.location)
+        get_categories.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()
