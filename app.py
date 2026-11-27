@@ -2963,6 +2963,66 @@ def driver_catalog():
         max_points=options["max_points"],
     )
 
+@app.get("/driver/catalog/<int:catalog_item_id>")
+@driver_required
+def driver_catalog_item_detail(catalog_item_id):
+    """Show one active product from the driver's own sponsor catalog."""
+
+    try:
+        item = db.session.execute(
+            text(
+                """
+                SELECT
+                    ci.catalog_item_id,
+                    ci.title,
+                    ci.description,
+                    ci.category,
+                    ci.price_usd,
+                    ci.image_url,
+                    so.name AS sponsor_name,
+                    dp.point_balance,
+                    CEILING(
+                        ci.price_usd / so.point_dollar_value
+                    ) AS points_price
+                FROM app_user AS u
+                JOIN driver_profile AS dp
+                    ON dp.user_id = u.user_id
+                JOIN sponsor_org AS so
+                    ON so.sponsor_org_id = dp.sponsor_org_id
+                JOIN catalog_item AS ci
+                    ON ci.sponsor_org_id = dp.sponsor_org_id
+                WHERE u.user_id = :driver_user_id
+                  AND u.role = 'DRIVER'
+                  AND u.status = 'ACTIVE'
+                  AND so.status = 'ACTIVE'
+                  AND ci.active = 1
+                  AND ci.catalog_item_id = :catalog_item_id
+                """
+            ),
+            {
+                "driver_user_id": session["user_id"],
+                "catalog_item_id": catalog_item_id,
+            },
+        ).mappings().first()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver product detail database error")
+        return "Unable to load product details right now.", 500
+
+    if item is None:
+        return "Catalog item not found.", 404
+
+    points_price = int(item["points_price"])
+    point_balance = int(item["point_balance"])
+
+    return render_template(
+        "driver_catalog_item_detail.html",
+        item=item,
+        points_price=points_price,
+        point_balance=point_balance,
+        can_afford=point_balance >= points_price,
+        points_shortfall=max(0, points_price - point_balance),
+    )
 
 @app.post("/driver/catalog/<int:catalog_item_id>/purchase")
 @driver_required

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ item.title }} — My Sponsor Catalog</title>
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='styles.css') }}"
+    >
+</head>
+<body>
+    <main class="catalog-page">
+        <a class="back-link" href="{{ url_for('driver_catalog') }}">
+            Back to catalog
+        </a>
+
+        <article>
+            <header>
+                <h1>{{ item.title }}</h1>
+                <p>Offered by {{ item.sponsor_name }}</p>
+            </header>
+
+            {% if item.image_url
+                  and item.image_url.startswith('https://') %}
+                <img
+                    src="{{ item.image_url }}"
+                    alt="{{ item.title }}"
+                    referrerpolicy="no-referrer"
+                    style="max-width: 100%; max-height: 400px; object-fit: contain;"
+                >
+            {% else %}
+                <p>No image available</p>
+            {% endif %}
+
+            <h2>Product details</h2>
+
+            {% if item.description %}
+                <p style="white-space: pre-wrap;">{{ item.description }}</p>
+            {% else %}
+                <p>No description available.</p>
+            {% endif %}
+
+            {% if item.category %}
+                <p>Category: {{ item.category }}</p>
+            {% endif %}
+
+            <h2>Catalog price</h2>
+            <p>{{ points_price }} points</p>
+            <p>${{ "%.2f"|format(item.price_usd) }} USD</p>
+
+            <h2>Your points</h2>
+            <p>Your balance: {{ point_balance }} points</p>
+
+            {% if can_afford %}
+                <p>You can afford this item.</p>
+                <p>Balance after purchase: {{ point_balance - points_price }} points</p>
+            {% else %}
+                <p>You cannot afford this item yet.</p>
+                <p>You need {{ points_shortfall }} more points.</p>
+            {% endif %}
+
+            <p>
+                These details use the stored catalog information.
+                Live price and availability are not refreshed on this page yet.
+            </p>
+        </article>
+
+        <a href="{{ url_for('driver_catalog') }}">Continue browsing</a>
+    </main>
+</body>
+</html>
