@@ -32,7 +32,8 @@ CREATE TABLE app_user (
 
 CREATE TABLE driver_profile (
     user_id INTEGER PRIMARY KEY,
-    sponsor_org_id INTEGER NOT NULL
+    sponsor_org_id INTEGER NOT NULL,
+    point_balance INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE catalog_item (
@@ -507,6 +508,183 @@ class CatalogIsolationTests(unittest.TestCase):
             "No matching rewards",
             response.get_data(as_text=True),
         )
+
+    def test_driver_can_view_own_sponsor_product_details(self):
+        self.database_session.execute(
+            text("""
+                UPDATE catalog_item
+                SET description = 'Full reward description.',
+                    category = 'Electronics'
+                WHERE catalog_item_id = 1
+            """)
+        )
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        response = self.client.get("/driver/catalog/1")
+
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Sponsor A Item 1", body)
+        self.assertIn("Full reward description.", body)
+        self.assertIn("Electronics", body)
+        self.assertIn("1000 points", body)
+        self.assertIn("No image available", body)
+        self.assertIn("Back to catalog", body)
+
+    def test_product_detail_hides_foreign_inactive_and_missing_items(self):
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        for item_id in (3, 4, 999):
+            with self.subTest(item_id=item_id):
+                response = self.client.get(
+                    f"/driver/catalog/{item_id}",
+                    query_string={"sponsor_org_id": 2},
+                )
+
+                self.assertEqual(response.status_code, 404)
+                self.assertEqual(
+                    response.get_data(as_text=True),
+                    "Catalog item not found.",
+                )
+
+    def test_product_detail_requires_driver_account(self):
+        response = self.client.get("/driver/catalog/1")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.location.endswith("/driver/login")
+        )
+
+        with self.client.session_transaction() as login_session:
+            login_session["user_id"] = 101
+            login_session["role"] = "SPONSOR"
+
+        response = self.client.get("/driver/catalog/1")
+        self.assertEqual(response.status_code, 403)
+
+    def test_inactive_driver_cannot_view_product_details(self):
+        self.sign_in(user_id=303, fake_sponsor_id=1)
+
+        response = self.client.get("/driver/catalog/1")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_product_detail_escapes_description_html(self):
+        self.database_session.execute(
+            text("""
+                UPDATE catalog_item
+                SET description = :description
+                WHERE catalog_item_id = 1
+            """),
+            {"description": "<script>alert('unsafe')</script>"},
+        )
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        response = self.client.get("/driver/catalog/1")
+
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("&lt;script&gt;", body)
+        self.assertNotIn("<script>", body)
+
+    def test_product_detail_has_description_fallback(self):
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        response = self.client.get("/driver/catalog/1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "No description available.",
+            response.get_data(as_text=True),
+        )
+
+    def test_catalog_links_to_product_details(self):
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        response = self.client.get("/driver/catalog")
+
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/driver/catalog/1"', body)
+        self.assertIn('href="/driver/catalog/2"', body)
+
+    def test_product_detail_uses_sponsor_specific_points_conversion(self):
+        self.sign_in(user_id=202, fake_sponsor_id=1)
+
+        response = self.client.get("/driver/catalog/4")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "750 points",
+            response.get_data(as_text=True),
+        )
+
+    def set_balance(self, user_id, balance):
+        self.database_session.execute(
+            text("""
+                UPDATE driver_profile
+                SET point_balance = :balance
+                WHERE user_id = :user_id
+            """),
+            {"balance": balance, "user_id": user_id},
+        )
+
+    def test_detail_shows_affordable_item_and_remaining_balance(self):
+        self.set_balance(101, 1500)
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        body = self.client.get("/driver/catalog/1").get_data(as_text=True)
+
+        self.assertIn("Your balance: 1500 points", body)
+        self.assertIn("You can afford this item.", body)
+        self.assertIn("Balance after purchase: 500 points", body)
+        self.assertNotIn("cannot afford", body)
+
+    def test_detail_treats_exact_balance_as_affordable(self):
+        self.set_balance(101, 1000)
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        body = self.client.get("/driver/catalog/1").get_data(as_text=True)
+
+        self.assertIn("You can afford this item.", body)
+        self.assertIn("Balance after purchase: 0 points", body)
+
+    def test_detail_shows_shortfall_when_balance_is_too_low(self):
+        self.set_balance(101, 400)
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        body = self.client.get("/driver/catalog/1").get_data(as_text=True)
+
+        self.assertIn("Your balance: 400 points", body)
+        self.assertIn("You cannot afford this item yet.", body)
+        self.assertIn("You need 600 more points.", body)
+        self.assertNotIn("You can afford", body)
+
+    def test_detail_handles_zero_balance(self):
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        body = self.client.get("/driver/catalog/2").get_data(as_text=True)
+
+        self.assertIn("Your balance: 0 points", body)
+        self.assertIn("You need 2000 more points.", body)
+
+    def test_detail_uses_only_the_signed_in_drivers_balance(self):
+        self.set_balance(101, 50)
+        self.set_balance(202, 9000)
+        self.sign_in(user_id=101, fake_sponsor_id=2)
+
+        body = self.client.get("/driver/catalog/1").get_data(as_text=True)
+
+        self.assertIn("Your balance: 50 points", body)
+        self.assertNotIn("9000", body)
+
+    def test_detail_affordability_uses_sponsor_conversion_rate(self):
+        self.set_balance(202, 750)
+        self.sign_in(user_id=202, fake_sponsor_id=1)
+
+        body = self.client.get("/driver/catalog/4").get_data(as_text=True)
+
+        self.assertIn("750 points", body)
+        self.assertIn("You can afford this item.", body)
 
 if __name__ == "__main__":
     unittest.main()

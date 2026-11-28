@@ -160,6 +160,13 @@
                         <div class="catalog-card-content">
                             <h2>{{ item.title }}</h2>
 
+                            <a href="{{ url_for(
+                                'driver_catalog_item_detail',
+                                catalog_item_id=item.catalog_item_id
+                            ) }}">
+                                View product details
+                            </a>
+
                             {% if item.description %}
                                 <p class="catalog-description">
                                     {{ item.description }}

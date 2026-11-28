@@ -12,6 +12,8 @@ from sqlalchemy import URL, text
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
+from datetime import datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from product_api import (
     EbayApiError,
     EbayProductApiClient,
@@ -916,6 +918,258 @@ def sponsor_product_search():
         searched=searched,
         source_label=source_label,
     ), status
+def get_active_sponsor_org_id(user_id):
+    """Return the sponsor org for an active sponsor user, else None."""
+
+    row = db.session.execute(
+        text(
+            """
+            SELECT u.sponsor_org_id
+            FROM app_user AS u
+            JOIN sponsor_org AS so
+                ON so.sponsor_org_id = u.sponsor_org_id
+            WHERE u.user_id = :user_id
+              AND u.role = 'SPONSOR'
+              AND u.status = 'ACTIVE'
+              AND so.status = 'ACTIVE'
+            """
+        ),
+        {"user_id": user_id},
+    ).first()
+
+    return None if row is None else row[0]
+
+
+def build_catalog_item_values(product) -> dict:
+    """Validate a provider product and return column values for storage."""
+
+    if product.availability != "AVAILABLE":
+        raise ValueError(
+            "This product is currently unavailable and cannot be added."
+        )
+
+    try:
+        price = Decimal(str(product.price_usd)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    except (InvalidOperation, ValueError):
+        raise ValueError("This product has an invalid price.")
+
+    if price <= 0 or price > Decimal("99999999.99"):
+        raise ValueError("This product has an unsupported price.")
+
+    title = (product.title or "").strip()[:300]
+    if not title:
+        raise ValueError("This product has no title.")
+
+    description = (product.description or "").strip()[:5000] or None
+
+    image_url = product.image_url
+    if not (
+        isinstance(image_url, str)
+        and image_url.startswith("https://")
+        and len(image_url) <= 1000
+    ):
+        image_url = None
+
+    return {
+        "title": title,
+        "description": description,
+        "price_usd": str(price),
+        "image_url": image_url,
+    }
+
+
+@app.post("/sponsor/products/add")
+@sponsor_required
+def sponsor_add_catalog_product():
+    """Copy one provider product into the sponsor's own catalog."""
+
+    external_product_id = request.form.get("external_product_id", "").strip()
+    query = request.form.get("q", "").strip()[:100]
+    back = (
+        url_for("sponsor_product_search", q=query)
+        if query
+        else url_for("sponsor_product_search")
+    )
+
+    if not external_product_id or len(external_product_id) > 120:
+        flash("That product could not be added.", "error")
+        return redirect(back)
+
+    try:
+        sponsor_org_id = get_active_sponsor_org_id(session["user_id"])
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Sponsor catalog authorization failed")
+        return "Unable to verify sponsor access right now.", 503
+
+    if sponsor_org_id is None:
+        return "Access denied.", 403
+
+    try:
+        product = get_product_search_client().get_by_external_id(
+            external_product_id
+        )
+    except (EbayApiError, ValueError):
+        app.logger.error("Product lookup failed during catalog add")
+        flash("Product lookup is unavailable. Please try again later.", "error")
+        return redirect(back)
+
+    if product is None:
+        flash("That product could not be found.", "error")
+        return redirect(back)
+
+    try:
+        values = build_catalog_item_values(product)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(back)
+
+    parameters = {
+        **values,
+        "sponsor_org_id": sponsor_org_id,
+        "external_product_id": product.external_product_id,
+    }
+
+    try:
+        existing = db.session.execute(
+            text(
+                """
+                SELECT catalog_item_id, active
+                FROM catalog_item
+                WHERE sponsor_org_id = :sponsor_org_id
+                  AND external_product_id = :external_product_id
+                """
+            ),
+            parameters,
+        ).mappings().first()
+
+        if existing is not None and existing["active"]:
+            db.session.rollback()
+            flash("That product is already in your catalog.", "error")
+            return redirect(back)
+
+        if existing is None:
+            db.session.execute(
+                text(
+                    """
+                    INSERT INTO catalog_item (
+                        sponsor_org_id, external_product_id, title,
+                        description, price_usd, image_url,
+                        active, last_synced_at
+                    )
+                    VALUES (
+                        :sponsor_org_id, :external_product_id, :title,
+                        :description, :price_usd, :image_url,
+                        1, CURRENT_TIMESTAMP
+                    )
+                    """
+                ),
+                parameters,
+            )
+        else:
+            db.session.execute(
+                text(
+                    """
+                    UPDATE catalog_item
+                    SET title = :title,
+                        description = :description,
+                        price_usd = :price_usd,
+                        image_url = :image_url,
+                        active = 1,
+                        last_synced_at = CURRENT_TIMESTAMP
+                    WHERE catalog_item_id = :catalog_item_id
+                      AND sponsor_org_id = :sponsor_org_id
+                    """
+                ),
+                {
+                    **parameters,
+                    "catalog_item_id": existing["catalog_item_id"],
+                },
+            )
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Sponsor catalog add failed")
+        flash("Unable to add that product right now.", "error")
+        return redirect(back)
+
+    flash(f"{values['title']} was added to your catalog.", "success")
+    return redirect(back)
+
+
+@app.get("/sponsor/catalog")
+@sponsor_required
+def sponsor_catalog():
+    """List the sponsor's active catalog items with remove actions."""
+
+    try:
+        sponsor_org_id = get_active_sponsor_org_id(session["user_id"])
+        if sponsor_org_id is None:
+            return "Access denied.", 403
+
+        items = db.session.execute(
+            text(
+                """
+                SELECT catalog_item_id, external_product_id, title,
+                       category, price_usd
+                FROM catalog_item
+                WHERE sponsor_org_id = :sponsor_org_id
+                  AND active = 1
+                ORDER BY title ASC, catalog_item_id ASC
+                LIMIT 200
+                """
+            ),
+            {"sponsor_org_id": sponsor_org_id},
+        ).mappings().all()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Sponsor catalog list failed")
+        return "Unable to load your catalog right now.", 500
+
+    return render_template("sponsor_catalog.html", items=items)
+
+
+@app.post("/sponsor/catalog/<int:catalog_item_id>/remove")
+@sponsor_required
+def sponsor_remove_catalog_item(catalog_item_id):
+    """Deactivate one of the sponsor's own catalog items."""
+
+    try:
+        sponsor_org_id = get_active_sponsor_org_id(session["user_id"])
+        if sponsor_org_id is None:
+            return "Access denied.", 403
+
+        result = db.session.execute(
+            text(
+                """
+                UPDATE catalog_item
+                SET active = 0
+                WHERE catalog_item_id = :catalog_item_id
+                  AND sponsor_org_id = :sponsor_org_id
+                  AND active = 1
+                """
+            ),
+            {
+                "catalog_item_id": catalog_item_id,
+                "sponsor_org_id": sponsor_org_id,
+            },
+        )
+
+        if result.rowcount != 1:
+            db.session.rollback()
+            return "Catalog item not found.", 404
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Sponsor catalog removal failed")
+        return "Unable to remove that product right now.", 500
+
+    flash("The product was removed from your catalog.", "success")
+    return redirect(url_for("sponsor_catalog"))
 
 # - admin can login
 @app.get("/admin/home")
@@ -4345,33 +4599,110 @@ def driver_point_history():
         point_history=point_history,
     )
 
+#24950 - filter and seach purchase history
+
+ORDER_STATUSES = ("PLACED", "CANCELLED", "SHIPPED", "DELIVERED")
+
+
+def get_order_history_filters() -> dict:
+    """Validate optional purchase-history filters from the query string."""
+
+    status = request.args.get("status", "").strip().upper()
+    keyword = request.args.get("q", "").strip()
+
+    if status and status not in ORDER_STATUSES:
+        raise ValueError("Unsupported order status.")
+    if len(keyword) > 100:
+        raise ValueError("Search must be 100 characters or fewer.")
+
+    dates = {}
+    for name in ("from", "to"):
+        raw_value = request.args.get(name, "").strip()
+        if raw_value:
+            try:
+                dates[name] = datetime.strptime(raw_value, "%Y-%m-%d").date()
+            except ValueError:
+                raise ValueError(
+                    f"'{name}' must be a date in YYYY-MM-DD format."
+                )
+
+    date_from = dates.get("from")
+    date_to = dates.get("to")
+    if date_from and date_to and date_from > date_to:
+        raise ValueError("The start date must not be after the end date.")
+
+    return {
+        "status": status,
+        "keyword": keyword,
+        "date_from": date_from,
+        "date_to": date_to,
+    }
+
+
+def build_order_history_query(driver_user_id: int, filters: dict):
+    """Build the driver-scoped history query with bound parameters only."""
+
+    sql = """
+        SELECT po.order_id, po.status, po.total_points, po.total_usd,
+               po.created_at, s.name AS sponsor_name
+        FROM purchase_order AS po
+        JOIN sponsor_org AS s
+            ON s.sponsor_org_id = po.sponsor_org_id
+        WHERE po.driver_user_id = :driver_user_id
+    """
+    params = {"driver_user_id": driver_user_id}
+
+    if filters["status"]:
+        sql += " AND po.status = :status"
+        params["status"] = filters["status"]
+
+    keyword = filters["keyword"]
+    if keyword:
+        escaped = (
+            keyword.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        )
+        params["keyword"] = f"%{escaped}%"
+        line_match = """EXISTS (
+            SELECT 1 FROM order_line AS ol
+            WHERE ol.order_id = po.order_id
+              AND LOWER(ol.title) LIKE LOWER(:keyword) ESCAPE '!'
+        )"""
+        number = keyword.lstrip("#")
+        if number.isascii() and number.isdigit() and len(number) <= 18:
+            params["order_id"] = int(number)
+            sql += f" AND (po.order_id = :order_id OR {line_match})"
+        else:
+            sql += f" AND {line_match}"
+
+    if filters["date_from"]:
+        sql += " AND po.created_at >= :date_from"
+        params["date_from"] = filters["date_from"].isoformat()
+
+    if filters["date_to"]:
+        sql += " AND po.created_at < :date_to_end"
+        params["date_to_end"] = (
+            filters["date_to"] + timedelta(days=1)
+        ).isoformat()
+
+    sql += " ORDER BY po.created_at DESC, po.order_id DESC"
+    return sql, params
 
 # 23886, 23887, 23888, 23890 & 23892 - Driver purchase self-service
 
 @app.get("/driver/orders")
 @driver_required
 def driver_orders():
-    """Show the authenticated driver's complete purchase history."""
+    """Show the authenticated driver's filtered purchase history."""
 
     try:
-        orders = db.session.execute(
-            text(
-                """
-                SELECT po.order_id,
-                       po.status,
-                       po.total_points,
-                       po.total_usd,
-                       po.created_at,
-                       s.name AS sponsor_name
-                FROM purchase_order AS po
-                JOIN sponsor_org AS s
-                  ON s.sponsor_org_id = po.sponsor_org_id
-                WHERE po.driver_user_id = :driver_user_id
-                ORDER BY po.created_at DESC, po.order_id DESC
-                """
-            ),
-            {"driver_user_id": session["user_id"]},
-        ).mappings().all()
+        filters = get_order_history_filters()
+    except ValueError as exc:
+        return str(exc), 400
+
+    sql, params = build_order_history_query(session["user_id"], filters)
+
+    try:
+        orders = db.session.execute(text(sql), params).mappings().all()
     except Exception:
         db.session.rollback()
         app.logger.exception("Driver purchase history database error")
@@ -4380,6 +4711,8 @@ def driver_orders():
     return render_template(
         "driver_orders.html",
         orders=orders,
+        filters=filters,
+        is_filtered=any(filters.values()),
     )
 
 
@@ -5063,6 +5396,66 @@ def driver_catalog():
         max_points=options["max_points"],
     )
 
+@app.get("/driver/catalog/<int:catalog_item_id>")
+@driver_required
+def driver_catalog_item_detail(catalog_item_id):
+    """Show one active product from the driver's own sponsor catalog."""
+
+    try:
+        item = db.session.execute(
+            text(
+                """
+                SELECT
+                    ci.catalog_item_id,
+                    ci.title,
+                    ci.description,
+                    ci.category,
+                    ci.price_usd,
+                    ci.image_url,
+                    so.name AS sponsor_name,
+                    dp.point_balance,
+                    CEILING(
+                        ci.price_usd / so.point_dollar_value
+                    ) AS points_price
+                FROM app_user AS u
+                JOIN driver_profile AS dp
+                    ON dp.user_id = u.user_id
+                JOIN sponsor_org AS so
+                    ON so.sponsor_org_id = dp.sponsor_org_id
+                JOIN catalog_item AS ci
+                    ON ci.sponsor_org_id = dp.sponsor_org_id
+                WHERE u.user_id = :driver_user_id
+                  AND u.role = 'DRIVER'
+                  AND u.status = 'ACTIVE'
+                  AND so.status = 'ACTIVE'
+                  AND ci.active = 1
+                  AND ci.catalog_item_id = :catalog_item_id
+                """
+            ),
+            {
+                "driver_user_id": session["user_id"],
+                "catalog_item_id": catalog_item_id,
+            },
+        ).mappings().first()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Driver product detail database error")
+        return "Unable to load product details right now.", 500
+
+    if item is None:
+        return "Catalog item not found.", 404
+
+    points_price = int(item["points_price"])
+    point_balance = int(item["point_balance"])
+
+    return render_template(
+        "driver_catalog_item_detail.html",
+        item=item,
+        points_price=points_price,
+        point_balance=point_balance,
+        can_afford=point_balance >= points_price,
+        points_shortfall=max(0, points_price - point_balance),
+    )
 
 @app.post("/driver/catalog/<int:catalog_item_id>/purchase")
 @driver_required

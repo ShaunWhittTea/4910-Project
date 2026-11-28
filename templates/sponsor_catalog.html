@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Manage catalog</title>
+</head>
+<body>
+    <a href="{{ url_for('sponsor_dashboard') }}">Back to dashboard</a>
+    <h1>Manage catalog</h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            <p role="status">{{ message }}</p>
+        {% endfor %}
+    {% endwith %}
+
+    <p><a href="{{ url_for('sponsor_product_search') }}">
+        Search for products to add
+    </a></p>
+
+    {% if items %}
+        <p>{{ items | length }} active products.</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th>Price</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                    <tr>
+                        <td>{{ item.title }}</td>
+                        <td>{{ item.category or '—' }}</td>
+                        <td>${{ "%.2f" | format(item.price_usd) }} USD</td>
+                        <td>
+                            <form method="post"
+                                  action="{{ url_for('sponsor_remove_catalog_item',
+                                                     catalog_item_id=item.catalog_item_id) }}"
+                                  onsubmit="return confirm('Remove this product from your catalog?');">
+                                <button type="submit">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>Your catalog has no active products yet.</p>
+    {% endif %}
+</body>
+</html>

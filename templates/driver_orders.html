@@ -24,6 +24,48 @@
             </a>
         </header>
 
+        <form method="get" action="{{ url_for('driver_orders') }}">
+            <div>
+                <label for="order-search">Search</label>
+                <input id="order-search" type="search" name="q"
+                       value="{{ filters.keyword }}" maxlength="100"
+                       placeholder="Order number or item name">
+            </div>
+
+            <div>
+                <label for="order-status">Status</label>
+                <select id="order-status" name="status">
+                    <option value="">All statuses</option>
+                    {% for value, label in [
+                        ('PLACED', 'Placed'),
+                        ('CANCELLED', 'Cancelled'),
+                        ('SHIPPED', 'Shipped'),
+                        ('DELIVERED', 'Delivered')
+                    ] %}
+                        <option value="{{ value }}"
+                                {% if filters.status == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="order-from">From</label>
+                <input id="order-from" type="date" name="from"
+                    value="{{ filters.date_from.isoformat() if filters.date_from else '' }}">
+            </div>
+
+            <div>
+                <label for="order-to">To</label>
+                <input id="order-to" type="date" name="to"
+                    value="{{ filters.date_to.isoformat() if filters.date_to else '' }}">
+            </div>
+
+            <button type="submit">Apply</button>
+            <a href="{{ url_for('driver_orders') }}">Clear filters</a>
+        </form>
+
         {% if orders %}
             <div class="driver-orders-table-wrap">
                 <table class="driver-orders-table">
@@ -69,10 +111,13 @@
                 </table>
             </div>
         {% else %}
-            <section class="driver-orders-empty" aria-live="polite">
+            {% if is_filtered %}
+                <h2>No matching purchases</h2>
+                <p>Try different search terms, a different status or dates, or clear the filters.</p>
+            {% else %}
                 <h2>No purchases yet</h2>
                 <p>Your completed orders will appear here after you redeem a reward.</p>
-            </section>
+            {% endif %}
         {% endif %}
 
         <div class="order-actions">
