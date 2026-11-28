@@ -302,6 +302,103 @@ class DriverOrderTests(unittest.TestCase):
         self.assertIn("cannot be canceled", body)
         self.assertIn("Delivered", body)
 
+    def get_history(self, rows=None, **query):
+        self.sign_in()
+        with patch.object(
+            driver_app.db.session,
+            "execute",
+            side_effect=[
+                active_driver_result(),
+                query_rows_result(rows if rows is not None else []),
+            ],
+        ) as execute:
+            response = self.client.get("/driver/orders", query_string=query)
+        return response, execute
+
+    def test_history_filters_use_bound_parameters_and_driver_scope(self):
+        response, execute = self.get_history(
+            q="mug",
+            status="shipped",
+            **{"from": "2026-10-01", "to": "2026-10-31"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        query = str(execute.call_args_list[1].args[0])
+        params = execute.call_args_list[1].args[1]
+        self.assertIn("po.driver_user_id = :driver_user_id", query)
+        self.assertIn("po.status = :status", query)
+        self.assertIn("ESCAPE '!'", query)
+        self.assertIn("po.created_at >= :date_from", query)
+        self.assertIn("po.created_at < :date_to_end", query)
+        self.assertNotIn("mug", query)
+        self.assertEqual(
+            params,
+            {
+                "driver_user_id": 42,
+                "status": "SHIPPED",
+                "keyword": "%mug%",
+                "date_from": "2026-10-01",
+                "date_to_end": "2026-11-01",
+            },
+        )
+
+    def test_numeric_search_matches_order_number_or_item_name(self):
+        response, execute = self.get_history(q="#501")
+
+        self.assertEqual(response.status_code, 200)
+        query = str(execute.call_args_list[1].args[0])
+        params = execute.call_args_list[1].args[1]
+        self.assertIn("po.order_id = :order_id", query)
+        self.assertEqual(params["order_id"], 501)
+        self.assertEqual(params["keyword"], "%#501%")
+
+    def test_search_wildcards_are_treated_literally(self):
+        response, execute = self.get_history(q="50%_")
+
+        self.assertEqual(response.status_code, 200)
+        params = execute.call_args_list[1].args[1]
+        self.assertEqual(params["keyword"], "%50!%!_%")
+        self.assertNotIn("order_id", params)
+
+    def test_invalid_history_filters_are_rejected_before_querying(self):
+        invalid_filters = [
+            {"status": "DROP"},
+            {"from": "2026-13-40"},
+            {"to": "yesterday"},
+            {"from": "2026-11-02", "to": "2026-11-01"},
+            {"q": "x" * 101},
+        ]
+        self.sign_in()
+
+        for query in invalid_filters:
+            with self.subTest(query=query):
+                with patch.object(
+                    driver_app.db.session,
+                    "execute",
+                    side_effect=[active_driver_result()],
+                ) as execute:
+                    response = self.client.get(
+                        "/driver/orders", query_string=query
+                    )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(execute.call_count, 1)
+
+    def test_filtered_history_with_no_matches_keeps_controls(self):
+        response, _ = self.get_history(q="zzznomatch")
+
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("No matching purchases", body)
+        self.assertNotIn("No purchases yet", body)
+        self.assertIn('name="status"', body)
+        self.assertIn('value="zzznomatch"', body)
+        self.assertIn("Clear filters", body)
+
+    def test_filters_do_not_change_unfiltered_empty_state(self):
+        response, _ = self.get_history()
+
+        self.assertIn("No purchases yet", response.get_data(as_text=True))
 
 if __name__ == "__main__":
     unittest.main()

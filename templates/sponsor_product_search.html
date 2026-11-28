@@ -35,6 +35,14 @@
     <a href="{{ url_for('sponsor_dashboard') }}">Back to dashboard</a>
 
     <h1>Search products</h1>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            <p class="{{ 'error' if category == 'error' else '' }}" role="status">
+                {{ message }}
+            </p>
+        {% endfor %}
+    {% endwith %}
+    <p><a href="{{ url_for('sponsor_catalog') }}">Manage my catalog</a></p>
     <p>Source: {{ source_label }}</p>
     <p>Search for candidate products. Results are not added to your catalog.</p>
 
@@ -85,6 +93,15 @@
 
                     <p>Availability: {{ product.availability }}</p>
                     <small>External ID: {{ product.external_product_id }}</small>
+                    <form method="post" action="{{ url_for('sponsor_add_catalog_product') }}">
+                        <input type="hidden" name="external_product_id"
+                            value="{{ product.external_product_id }}">
+                        <input type="hidden" name="q" value="{{ query }}">
+                        <button type="submit"
+                            {% if product.availability != 'AVAILABLE' %}disabled{% endif %}>
+                            Add to catalog
+                        </button>
+                    </form>
                 </article>
             {% endfor %}
         </section>
